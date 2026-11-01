@@ -280,28 +280,31 @@ export default function CardapioVirtualPage() {
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 pb-28">
-      {/* iFood-Style Store Header */}
+      {/* iFood-Style Store Header with Monster Burger Visual Identity */}
       <header className="border-b border-white/[0.08] bg-[#121215]">
         {/* Banner strip */}
-        <div className="h-28 sm:h-36 bg-gradient-to-r from-red-950 via-[#1a1215] to-[#121215] relative overflow-hidden">
-          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#ea1d2c_1px,transparent_1px)] [background-size:16px_16px]" />
+        <div className="h-28 sm:h-36 bg-gradient-to-r from-orange-950 via-[#1c120c] to-[#09090b] relative overflow-hidden">
+          <div className="absolute inset-0 opacity-25 bg-[radial-gradient(#ff5400_1px,transparent_1px)] [background-size:16px_16px]" />
+          <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-orange-500/10 to-transparent pointer-events-none" />
         </div>
 
         {/* Store Profile Info */}
         <div className="max-w-4xl mx-auto px-4 -mt-10 sm:-mt-12 pb-4 relative">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div className="flex items-end gap-3.5">
-              <div className="size-20 sm:size-24 rounded-2xl bg-[#18181c] border-2 border-[#121215] shadow-xl flex items-center justify-center text-3xl shrink-0">
-                🍔
-              </div>
+              <img
+                src="/logo.jpg"
+                alt="Monster Burger"
+                className="size-20 sm:size-24 rounded-2xl bg-black border-2 border-orange-500/40 shadow-2xl object-cover shrink-0"
+              />
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight">
-                    {store?.storeName || 'Hamburgueria Delivery'}
+                    {store?.storeName || 'Monster Burger'}
                   </h1>
                 </div>
                 <p className="text-xs text-zinc-400 line-clamp-1">
-                  {store?.storeSubtitle || 'Lanches artesanais, smash burgers e bebidas'}
+                  {store?.storeSubtitle || 'Smash Burger Artesanal • Delivery Rápido'}
                 </p>
                 <div className="flex flex-wrap items-center gap-3 text-xs pt-1">
                   <span className="flex items-center gap-1 font-semibold text-amber-400">
@@ -379,7 +382,7 @@ export default function CardapioVirtualPage() {
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${
                   selectedCategory === cat
-                    ? 'bg-[#ea1d2c] text-white shadow-sm'
+                    ? 'bg-[#ff5400] text-white shadow-sm shadow-orange-500/25'
                     : 'bg-[#18181c] text-zinc-400 hover:text-zinc-200 border border-white/[0.06]'
                 }`}
               >
@@ -525,7 +528,7 @@ export default function CardapioVirtualPage() {
                         type="button"
                         aria-label={`Aumentar ${item.name}`}
                         onClick={() => addToCart(item.id, 1)}
-                        className="size-6 rounded bg-[#ea1d2c] text-white text-xs flex items-center justify-center"
+                        className="size-6 rounded bg-[#ff5400] hover:bg-[#ea4b00] text-white text-xs flex items-center justify-center transition"
                       >
                         <Plus className="size-3" />
                       </button>
@@ -534,7 +537,7 @@ export default function CardapioVirtualPage() {
                     <button
                       type="button"
                       onClick={() => addToCart(item.id, 1)}
-                      className="px-3 py-1 bg-[#18181c] hover:bg-[#ea1d2c] hover:text-white border border-white/[0.1] text-zinc-200 text-xs font-medium rounded-[6px] flex items-center gap-1 transition"
+                      className="px-3 py-1 bg-[#18181c] hover:bg-[#ff5400] hover:text-white border border-white/[0.1] text-zinc-200 text-xs font-medium rounded-[6px] flex items-center gap-1 transition"
                     >
                       <Plus className="size-3" /> Adicionar
                     </button>
@@ -551,7 +554,7 @@ export default function CardapioVirtualPage() {
         <div className="fixed bottom-0 inset-x-0 bg-[#121215]/95 border-t border-white/[0.08] p-3 z-40 backdrop-blur-md">
           <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <span className="size-8 rounded-full bg-[#ea1d2c] text-white text-xs font-bold flex items-center justify-center tabular-nums">
+              <span className="size-8 rounded-full bg-[#ff5400] text-white text-xs font-bold flex items-center justify-center tabular-nums shadow-sm shadow-orange-500/30">
                 {totalCartItems}
               </span>
               <div>
@@ -565,7 +568,7 @@ export default function CardapioVirtualPage() {
             <button
               type="button"
               onClick={() => setBagOpen(true)}
-              className="px-6 py-2.5 bg-[#ea1d2c] hover:bg-[#d61725] text-white font-semibold rounded-[8px] text-xs flex items-center gap-2 shadow-lg"
+              className="px-6 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center gap-2 shadow-lg shadow-orange-500/25 transition active:scale-95"
             >
               <ShoppingBag className="size-4" />
               Ver sacola
@@ -581,7 +584,7 @@ export default function CardapioVirtualPage() {
           <div className="bg-[#121215] border border-white/[0.12] w-full max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <div className="flex items-center gap-2">
-                <ShoppingBag className="size-4 text-[#ea1d2c]" />
+                <ShoppingBag className="size-4 text-[#ff5400]" />
                 <h2 className="text-sm font-semibold text-zinc-100">Sua Sacola</h2>
               </div>
               <button
@@ -800,7 +803,7 @@ export default function CardapioVirtualPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3 bg-[#ea1d2c] hover:bg-[#d61725] text-white font-semibold rounded-[8px] text-xs shadow-lg transition"
+                className="w-full py-3 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs shadow-lg shadow-orange-500/25 transition active:scale-[0.99] disabled:opacity-50"
               >
                 {submitting
                   ? 'Confirmando pedido...'

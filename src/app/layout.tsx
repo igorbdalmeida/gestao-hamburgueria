@@ -2,9 +2,13 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Brutus Smash & Burger | Gestão & Cardápio Delivery',
+  title: 'Monster Burger | Gestão & Cardápio Delivery',
   description:
-    'Sistema completo de Gestão Financeira, Notas Fiscais, Fichas Técnicas, Precificação e Cardápio Virtual com CRM para Hamburgueria Delivery.',
+    'Monster Burger - Smash Burger Artesanal. Sistema completo de Gestão Financeira, Notas Fiscais, Precificação e Cardápio Virtual Delivery.',
+  icons: {
+    icon: '/logo.jpg',
+    apple: '/logo.jpg',
+  },
 };
 
 export default function RootLayout({
@@ -14,7 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body className="antialiased selection:bg-amber-500 selection:text-black">
+      <body className="antialiased selection:bg-orange-500 selection:text-white">
         {children}
       </body>
     </html>

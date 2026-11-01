@@ -139,12 +139,21 @@ export default function AdminManagementPage() {
   if (!authenticated) {
     return (
       <div className="min-h-screen bg-[#09090b] text-zinc-100 flex items-center justify-center p-4">
-        <div className="max-w-sm w-full bg-[#121215] border border-white/[0.08] rounded-[12px] p-6 space-y-5">
-          <div className="space-y-1">
-            <h1 className="text-base font-semibold text-zinc-100">Painel Administrativo</h1>
-            <p className="text-xs text-zinc-400">
-              Digite seu PIN para acessar a gestão da hamburgueria.
-            </p>
+        <div className="max-w-sm w-full bg-[#121215] border border-white/[0.08] rounded-[14px] p-6 space-y-5 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-600 via-amber-500 to-orange-600" />
+          
+          <div className="flex items-center gap-3.5 pt-1">
+            <img
+              src="/logo.jpg"
+              alt="Monster Burger"
+              className="size-12 rounded-[10px] object-cover border border-orange-500/30 shadow-md bg-black"
+            />
+            <div>
+              <h1 className="text-base font-bold text-zinc-100 tracking-tight">Monster Burger</h1>
+              <p className="text-xs text-zinc-400">
+                Painel de Gestão & Precificação
+              </p>
+            </div>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -159,7 +168,7 @@ export default function AdminManagementPage() {
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
                 placeholder="••••"
-                className="w-full bg-[#09090b] border border-white/[0.1] focus-visible:border-zinc-300 rounded-[6px] px-3 py-2 text-center text-lg tracking-widest text-zinc-100 font-mono outline-none"
+                className="w-full bg-[#09090b] border border-white/[0.1] focus-visible:border-orange-500 rounded-[6px] px-3 py-2 text-center text-lg tracking-widest text-zinc-100 font-mono outline-none"
               />
             </div>
 
@@ -167,14 +176,14 @@ export default function AdminManagementPage() {
               <p className="text-xs text-rose-400 text-center">{authError}</p>
             )}
 
-            <button type="submit" className="btn-saas-primary w-full">
-              Entrar
+            <button type="submit" className="btn-monster-primary w-full">
+              Entrar no Sistema
             </button>
           </form>
 
           <div className="border-t border-white/[0.06] pt-3 text-center text-xs text-zinc-500">
-            <a href="/cardapio" className="text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1">
-              Abrir Cardápio Online <ExternalLink className="size-3" />
+            <a href="/cardapio" className="text-zinc-400 hover:text-orange-400 inline-flex items-center gap-1 transition-colors">
+              Abrir Cardápio Delivery (/cardapio) <ExternalLink className="size-3" />
             </a>
           </div>
         </div>
@@ -236,16 +245,18 @@ export default function AdminManagementPage() {
       <header className="bg-[#121215] border-b border-white/[0.08] sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="size-7 rounded-[6px] bg-zinc-100 text-zinc-950 font-bold text-xs flex items-center justify-center">
-              HB
-            </div>
+            <img
+              src="/logo.jpg"
+              alt="Monster Burger"
+              className="size-8 rounded-[7px] object-cover border border-orange-500/30 shadow-sm bg-black"
+            />
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-zinc-100">
+                <span className="text-xs font-bold text-zinc-100 tracking-tight">
                   {state.settings.storeName}
                 </span>
-                <span className="px-1.5 py-0.2 rounded text-[10px] text-zinc-400 bg-white/[0.04] border border-white/[0.08]">
-                  {saving ? 'Salvando...' : hasCloudDb ? 'Nuvem ativa' : 'Sincronizado'}
+                <span className="px-1.5 py-0.2 rounded text-[10px] text-orange-400 bg-orange-500/10 border border-orange-500/20 font-medium">
+                  {saving ? 'Salvando...' : hasCloudDb ? 'Nuvem ativa' : 'Online'}
                 </span>
               </div>
             </div>
