@@ -4,9 +4,14 @@ export function middleware(request: NextRequest) {
   const host = (request.headers.get('host') || '').toLowerCase();
   const { pathname } = request.nextUrl;
 
-  // Se o cliente estiver acessando por um domínio exclusivo de cardápio (ex: cardapio-*.vercel.app),
+  // Se o cliente estiver acessando por um domínio exclusivo de cardápio (ex: monsterburger.vercel.app),
   // bloqueia qualquer tentativa de acessar /gestao ou rotas /api/admin no nível de Edge.
-  const isDedicatedCardapioDomain = host.startsWith('cardapio-') || host.startsWith('pedido-');
+  const isDedicatedCardapioDomain =
+    host.startsWith('monsterburger.') ||
+    host.startsWith('monster-burger') ||
+    host.startsWith('pedir-') ||
+    host.startsWith('cardapio-') ||
+    host.startsWith('pedido-');
   if (isDedicatedCardapioDomain) {
     if (pathname.startsWith('/gestao') || pathname.startsWith('/api/admin')) {
       return NextResponse.redirect(new URL('/', request.url));

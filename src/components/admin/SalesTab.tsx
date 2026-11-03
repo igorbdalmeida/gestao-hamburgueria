@@ -15,6 +15,7 @@ import {
   SaleOrder,
 } from '@/lib/types';
 import {
+  Copy,
   ExternalLink,
   MessageCircle,
   PhoneCall,
@@ -248,14 +249,25 @@ export default function SalesTab({ state, onUpdateState }: Props) {
               <Trash2 className="size-3.5" /> Zerar Histórico de Vendas
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText('https://monsterburger.vercel.app');
+            }}
+            className="btn-saas-secondary text-xs"
+            title="Copiar link oficial do cardápio para enviar aos clientes"
+          >
+            <Copy className="size-3.5 text-orange-400" />
+            Copiar Link: monsterburger.vercel.app
+          </button>
           <a
-            href="/"
+            href="https://monsterburger.vercel.app"
             target="_blank"
             rel="noreferrer"
             className="btn-saas-secondary text-xs"
           >
             <ExternalLink className="size-3.5 text-zinc-400" />
-            Acessar Cardápio Online
+            Abrir Cardápio Oficial
           </a>
         </div>
       </div>

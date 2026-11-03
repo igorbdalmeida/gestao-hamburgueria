@@ -580,13 +580,14 @@ export default function AdminManagementPage() {
               <RefreshCw className="size-3.5" />
             </button>
             <a
-              href="/"
+              href="https://monsterburger.vercel.app"
               target="_blank"
               rel="noreferrer"
               className="btn-saas-secondary text-xs hidden sm:inline-flex"
+              title="Abrir o cardápio oficial do cliente (monsterburger.vercel.app)"
             >
               <ExternalLink className="size-3.5 text-zinc-400" />
-              Abrir Cardápio Público
+              monsterburger.vercel.app
             </a>
             <button
               type="button"
