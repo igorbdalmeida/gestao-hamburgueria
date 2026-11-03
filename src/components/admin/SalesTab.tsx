@@ -19,6 +19,7 @@ import {
   ExternalLink,
   MessageCircle,
   Plus,
+  ShoppingBag,
   Trash2,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -201,6 +202,15 @@ export default function SalesTab({ state, onUpdateState }: Props) {
     }));
   }
 
+  function handleClearAllOrders() {
+    if (state.orders.length === 0) return;
+    if (!confirm('Deseja zerar todo o histórico de vendas e fila de pedidos?')) return;
+    onUpdateState((prev) => ({
+      ...prev,
+      orders: [],
+    }));
+  }
+
   const totals = useMemo(() => {
     const valid = state.orders.filter((o) => o.status !== 'Cancelado');
     return {
@@ -223,15 +233,26 @@ export default function SalesTab({ state, onUpdateState }: Props) {
             Registro de caixa, provisões de impostos e pedidos do Cardápio Online.
           </p>
         </div>
-        <a
-          href="/cardapio"
-          target="_blank"
-          rel="noreferrer"
-          className="btn-saas-secondary text-xs"
-        >
-          <ExternalLink className="size-3.5 text-zinc-400" />
-          Acessar Cardápio Online (/cardapio)
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          {state.orders.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAllOrders}
+              className="px-3 py-1.5 rounded-[6px] bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 text-xs font-medium inline-flex items-center gap-1.5 transition"
+            >
+              <Trash2 className="size-3.5" /> Zerar Histórico de Vendas
+            </button>
+          )}
+          <a
+            href="/"
+            target="_blank"
+            rel="noreferrer"
+            className="btn-saas-secondary text-xs"
+          >
+            <ExternalLink className="size-3.5 text-zinc-400" />
+            Acessar Cardápio Online
+          </a>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -392,117 +413,129 @@ export default function SalesTab({ state, onUpdateState }: Props) {
           <span className="text-xs text-zinc-400 tabular-nums">{state.orders.length} pedidos</span>
         </div>
 
-        <div className="divide-y divide-white/[0.06] text-xs">
-          {state.orders.map((ord) => {
-            const waLink = `https://wa.me/55${normalizePhone(ord.customerPhone)}?text=${encodeURIComponent(
-              `Olá ${ord.customerName}! Aqui é da ${state.settings.storeName}. Pedido #${ord.orderNumber} (${formatBRL(ord.totalAmount)}) está com status: *${ord.status}*.`
-            )}`;
+        {state.orders.length === 0 ? (
+          <div className="p-8 text-center space-y-2">
+            <ShoppingBag className="size-7 text-zinc-500 mx-auto" />
+            <p className="text-xs font-medium text-zinc-300">
+              Nenhuma venda registrada ainda
+            </p>
+            <p className="text-[11px] text-zinc-500">
+              Os pedidos feitos pelos clientes no Cardápio Virtual ou lançados no PDV acima aparecerão aqui.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/[0.06] text-xs">
+            {state.orders.map((ord) => {
+              const waLink = `https://wa.me/55${normalizePhone(ord.customerPhone)}?text=${encodeURIComponent(
+                `Olá ${ord.customerName}! Aqui é da ${state.settings.storeName}. Pedido #${ord.orderNumber} (${formatBRL(ord.totalAmount)}) está com status: *${ord.status}*.`
+              )}`;
 
-            return (
-              <div
-                key={ord.id}
-                className="p-4 hover:bg-white/[0.01] flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-              >
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-zinc-100">
-                      #{ord.orderNumber}
-                    </span>
-                    <span className="text-zinc-200 font-medium">{ord.customerName}</span>
-                    {ord.customerPhone && ord.customerPhone !== '00000000000' && (
-                      <span className="text-zinc-500 font-mono">
-                        {formatPhoneBR(ord.customerPhone)}
+              return (
+                <div
+                  key={ord.id}
+                  className="p-4 hover:bg-white/[0.01] flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-zinc-100">
+                        #{ord.orderNumber}
                       </span>
-                    )}
-                    <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-400 text-[10px]">
-                      {ord.origin}
-                    </span>
-                    <span className="text-zinc-500 tabular-nums">{ord.date}</span>
-                  </div>
-
-                  <p className="text-zinc-300">
-                    {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(' • ')}
-                  </p>
-
-                  {ord.deliveryAddress?.street && (
-                    <p className="text-zinc-500 text-[11px]">
-                      {ord.deliveryAddress.street}, {ord.deliveryAddress.number} —{' '}
-                      {ord.deliveryAddress.neighborhood}
-                      {ord.deliveryAddress.complement ? ` (${ord.deliveryAddress.complement})` : ''}
-                    </p>
-                  )}
-
-                  {ord.customerNotes && (
-                    <p className="text-zinc-400 text-[11px]">Obs: {ord.customerNotes}</p>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="bg-[#18181c] border border-white/[0.06] rounded-[6px] px-3 py-1.5 text-right tabular-nums">
-                    <div className="font-medium text-zinc-100">{formatBRL(ord.totalAmount)}</div>
-                    <div className="text-[11px] text-emerald-400">
-                      Lucro: {formatBRL(ord.netProfit)}
+                      <span className="text-zinc-200 font-medium">{ord.customerName}</span>
+                      {ord.customerPhone && ord.customerPhone !== '00000000000' && (
+                        <span className="text-zinc-500 font-mono">
+                          {formatPhoneBR(ord.customerPhone)}
+                        </span>
+                      )}
+                      <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-400 text-[10px]">
+                        {ord.origin}
+                      </span>
+                      <span className="text-zinc-500 tabular-nums">{ord.date}</span>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={ord.status}
-                      aria-label="Status do pedido"
-                      onChange={(e) =>
-                        handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)
-                      }
-                      className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2.5 py-1.5 text-zinc-200 text-xs font-medium"
-                    >
-                      <option value="Novo Pedido">Novo Pedido</option>
-                      <option value="Em Preparo">Em Preparo</option>
-                      <option value="Saiu para Entrega">Em Entrega</option>
-                      <option value="Entregue">Entregue</option>
-                      <option value="Cancelado">Cancelado</option>
-                    </select>
+                    <p className="text-zinc-300">
+                      {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(' • ')}
+                    </p>
 
-                    {ord.customerPhone && ord.customerPhone !== '00000000000' && (
-                      <a
-                        href={waLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label="Enviar mensagem no WhatsApp"
-                        className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300 rounded-[6px]"
-                        title="WhatsApp"
-                      >
-                        <MessageCircle className="size-4" />
-                      </a>
+                    {ord.deliveryAddress?.street && (
+                      <p className="text-zinc-500 text-[11px]">
+                        {ord.deliveryAddress.street}, {ord.deliveryAddress.number} —{' '}
+                        {ord.deliveryAddress.neighborhood}
+                        {ord.deliveryAddress.complement ? ` (${ord.deliveryAddress.complement})` : ''}
+                      </p>
                     )}
 
-                    {ord.infinitePayLink && (
+                    {ord.customerNotes && (
+                      <p className="text-zinc-400 text-[11px]">Obs: {ord.customerNotes}</p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="bg-[#18181c] border border-white/[0.06] rounded-[6px] px-3 py-1.5 text-right tabular-nums">
+                      <div className="font-medium text-zinc-100">{formatBRL(ord.totalAmount)}</div>
+                      <div className="text-[11px] text-emerald-400">
+                        Lucro: {formatBRL(ord.netProfit)}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={ord.status}
+                        aria-label="Status do pedido"
+                        onChange={(e) =>
+                          handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)
+                        }
+                        className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2.5 py-1.5 text-zinc-200 text-xs font-medium"
+                      >
+                        <option value="Novo Pedido">Novo Pedido</option>
+                        <option value="Em Preparo">Em Preparo</option>
+                        <option value="Saiu para Entrega">Em Entrega</option>
+                        <option value="Entregue">Entregue</option>
+                        <option value="Cancelado">Cancelado</option>
+                      </select>
+
+                      {ord.customerPhone && ord.customerPhone !== '00000000000' && (
+                        <a
+                          href={waLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Enviar mensagem no WhatsApp"
+                          className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300 rounded-[6px]"
+                          title="WhatsApp"
+                        >
+                          <MessageCircle className="size-4" />
+                        </a>
+                      )}
+
+                      {ord.infinitePayLink && (
+                        <button
+                          type="button"
+                          aria-label="Copiar link InfinitePay"
+                          onClick={() => {
+                            navigator.clipboard.writeText(ord.infinitePayLink!);
+                            alert('Link copiado!');
+                          }}
+                          className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300 rounded-[6px]"
+                          title="Copiar Link InfinitePay"
+                        >
+                          <CreditCard className="size-4" />
+                        </button>
+                      )}
+
                       <button
                         type="button"
-                        aria-label="Copiar link InfinitePay"
-                        onClick={() => {
-                          navigator.clipboard.writeText(ord.infinitePayLink!);
-                          alert('Link copiado!');
-                        }}
-                        className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300 rounded-[6px]"
-                        title="Copiar Link InfinitePay"
+                        aria-label="Remover pedido"
+                        onClick={() => handleDeleteOrder(ord.id)}
+                        className="p-1.5 text-zinc-500 hover:text-rose-400"
                       >
-                        <CreditCard className="size-4" />
+                        <Trash2 className="size-4" />
                       </button>
-                    )}
-
-                    <button
-                      type="button"
-                      aria-label="Remover pedido"
-                      onClick={() => handleDeleteOrder(ord.id)}
-                      className="p-1.5 text-zinc-500 hover:text-rose-400"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

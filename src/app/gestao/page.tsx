@@ -59,6 +59,8 @@ export default function AdminManagementPage() {
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deletedOrderIdsRef = useRef<Set<string>>(new Set());
+  const deletedCustomerIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetch('/api/auth')
@@ -79,6 +81,9 @@ export default function AdminManagementPage() {
     }
 
     const payload = stateToSave || latestStateRef.current;
+    const deletedOrderIds = Array.from(deletedOrderIdsRef.current);
+    const deletedCustomerIds = Array.from(deletedCustomerIdsRef.current);
+
     setSaving(true);
     savingRef.current = true;
     dirtyRef.current = false;
@@ -87,11 +92,13 @@ export default function AdminManagementPage() {
       const res = await fetch('/api/admin/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: payload }),
+        body: JSON.stringify({
+          state: payload,
+          deletedOrderIds,
+          deletedCustomerIds,
+        }),
       });
       if (res.ok) {
-        // IMPORTANTE: Nunca sobrescrever o state local com a resposta do servidor durante a edição,
-        // para jamais interromper a digitação ou mover o cursor do usuário.
         if (!dirtyRef.current) {
           setHasUnsavedChanges(false);
         }
@@ -100,7 +107,6 @@ export default function AdminManagementPage() {
         );
       }
     } catch {
-      // Se falhar, mantém dirty para tentar novamente
       setHasUnsavedChanges(true);
     } finally {
       setSaving(false);
@@ -143,10 +149,13 @@ export default function AdminManagementPage() {
             setHasUnsavedChanges(false);
             dirtyRef.current = false;
           } else if (!dirtyRef.current && !savingRef.current) {
-            // No modo silencioso, atualiza somente se o número de pedidos mudou, sem tocar nos produtos/insumos em edição
             setState((prev) => {
-              const serverOrders = data.state.orders || [];
-              const serverCustomers = data.state.customers || [];
+              const serverOrders = (data.state.orders || []).filter(
+                (o: { id: string }) => !deletedOrderIdsRef.current.has(o.id)
+              );
+              const serverCustomers = (data.state.customers || []).filter(
+                (c: { id: string }) => !deletedCustomerIdsRef.current.has(c.id)
+              );
               if (
                 serverOrders.length === prev.orders.length &&
                 serverCustomers.length === prev.customers.length
@@ -175,17 +184,46 @@ export default function AdminManagementPage() {
   function handleUpdateState(updater: (prev: AppDatabaseState) => AppDatabaseState) {
     setState((prev) => {
       const next = updater(prev);
+
+      // Registra IDs de pedidos ou clientes excluídos para que nunca ressuscitem no servidor
+      const nextOrderIds = new Set(next.orders.map((o) => o.id));
+      for (const oldOrd of prev.orders) {
+        if (!nextOrderIds.has(oldOrd.id)) {
+          deletedOrderIdsRef.current.add(oldOrd.id);
+        }
+      }
+
+      const nextCustomerIds = new Set(next.customers.map((c) => c.id));
+      for (const oldCust of prev.customers) {
+        if (!nextCustomerIds.has(oldCust.id)) {
+          deletedCustomerIdsRef.current.add(oldCust.id);
+        }
+      }
+
+      const isStructuralAction =
+        next.orders.length !== prev.orders.length ||
+        next.customers.length !== prev.customers.length ||
+        next.invoices.length !== prev.invoices.length ||
+        next.products.length !== prev.products.length ||
+        next.ingredients.length !== prev.ingredients.length;
+
       latestStateRef.current = next;
       dirtyRef.current = true;
       setHasUnsavedChanges(true);
 
-      // Debounce: aguarda 1.8s após o usuário parar de digitar antes de salvar em segundo plano
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
-      debounceTimerRef.current = setTimeout(() => {
-        persistToServer(latestStateRef.current);
-      }, 1800);
+
+      if (isStructuralAction) {
+        // Exclusão ou adição de registro salva imediatamente no servidor
+        setTimeout(() => persistToServer(latestStateRef.current), 50);
+      } else {
+        // Edição de texto aguarda 1.8s após parar de digitar
+        debounceTimerRef.current = setTimeout(() => {
+          persistToServer(latestStateRef.current);
+        }, 1800);
+      }
 
       return next;
     });

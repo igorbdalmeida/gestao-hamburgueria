@@ -13,6 +13,19 @@ declare global {
 
 const LOCAL_FILE_PATH = path.join(process.cwd(), '.data-store.json');
 
+// IDs fictícios antigos de demonstração que devem ser removidos automaticamente
+const LEGACY_DEMO_ORDER_IDS = new Set(['ord-101', 'ord-102']);
+const LEGACY_DEMO_CUSTOMER_IDS = new Set(['cust-1', 'cust-2']);
+const LEGACY_DEMO_INVOICE_IDS = new Set([
+  'inv-nov-01',
+  'inv-nov-02',
+  'inv-nov-03',
+  'inv-nov-04',
+  'inv-nov-05',
+  'inv-nov-06',
+  'inv-nov-07',
+]);
+
 function getDatabaseUrl(): string | undefined {
   return (
     process.env.DATABASE_URL ||
@@ -53,16 +66,21 @@ async function getSql() {
 }
 
 function normalizeState(state: AppDatabaseState): AppDatabaseState {
-  return {
+  const merged: AppDatabaseState = {
     ...structuredClone(INITIAL_STATE),
     ...state,
     settings: { ...INITIAL_STATE.settings, ...(state.settings || {}) },
   };
+
+  // Remove automaticamente os dados fictícios de demonstração antigos caso estivessem salvos
+  merged.orders = (merged.orders || []).filter((o) => !LEGACY_DEMO_ORDER_IDS.has(o.id));
+  merged.customers = (merged.customers || []).filter((c) => !LEGACY_DEMO_CUSTOMER_IDS.has(c.id));
+  merged.invoices = (merged.invoices || []).filter((inv) => !LEGACY_DEMO_INVOICE_IDS.has(inv.id));
+
+  return merged;
 }
 
 export async function loadAppState(): Promise<AppDatabaseState> {
-  // If Postgres is configured, errors must propagate: falling back to seed data here
-  // could later overwrite the real database with demo data.
   const sql = await getSql();
 
   if (sql) {
@@ -96,11 +114,12 @@ export async function loadAppState(): Promise<AppDatabaseState> {
   if (!global.__APP_DB_STATE__) {
     global.__APP_DB_STATE__ = structuredClone(INITIAL_STATE);
   }
-  return global.__APP_DB_STATE__;
+  return normalizeState(global.__APP_DB_STATE__);
 }
 
 export async function saveAppState(newState: AppDatabaseState): Promise<AppDatabaseState> {
-  const updated: AppDatabaseState = { ...newState, updatedAt: new Date().toISOString() };
+  const cleaned = normalizeState(newState);
+  const updated: AppDatabaseState = { ...cleaned, updatedAt: new Date().toISOString() };
   global.__APP_DB_STATE__ = updated;
 
   const sql = await getSql();
@@ -117,59 +136,55 @@ export async function saveAppState(newState: AppDatabaseState): Promise<AppDatab
 }
 
 /**
- * Merge an admin-side save with the latest server state so that orders and customers
- * created by the public menu while the admin had the page open are never overwritten.
- * - Records present in the admin payload win (admin edits status, notes, tags...).
- * - Records that exist only on the server are kept, unless the admin explicitly deleted them.
+ * Salva o estado enviado pelo painel administrativo respeitando integralmente
+ * todas as exclusões de pedidos, clientes, notas, produtos e insumos feitas pelo gestor.
+ * Preserva apenas pedidos recém-criados pelo cardápio público nos últimos 15 segundos
+ * que ainda não tenham sido sincronizados na tela do gestor.
  */
 export function mergeAdminState(
   server: AppDatabaseState,
   incoming: AppDatabaseState,
-  deleted: { orderIds?: string[]; customerIds?: string[] }
+  deleted?: { orderIds?: string[]; customerIds?: string[]; allowFullReplace?: boolean }
 ): AppDatabaseState {
-  const deletedOrders = new Set(deleted.orderIds || []);
-  const deletedCustomers = new Set(deleted.customerIds || []);
+  if (deleted?.allowFullReplace !== false) {
+    // O estado enviado pelo painel administrativo tem autoridade total sobre exclusões.
+    // Só preserva pedidos do servidor se tiverem acabado de chegar nos últimos 12 segundos via Cardápio Virtual
+    const deletedOrders = new Set(deleted?.orderIds || []);
+    const deletedCustomers = new Set(deleted?.customerIds || []);
+    const nowMs = Date.now();
 
-  const incomingOrderIds = new Set(incoming.orders.map((o) => o.id));
-  const serverOnlyOrders: SaleOrder[] = server.orders.filter(
-    (o) => !incomingOrderIds.has(o.id) && !deletedOrders.has(o.id)
-  );
-
-  const serverCustomers = new Map(server.customers.map((c) => [c.id, c]));
-  const incomingCustomerIds = new Set(incoming.customers.map((c) => c.id));
-  const mergedCustomers: CustomerProfile[] = incoming.customers
-    .filter((c) => !deletedCustomers.has(c.id))
-    .map((c) => {
-      const srv = serverCustomers.get(c.id);
-      // Public menu updates order statistics; keep whichever has more orders recorded.
-      if (srv && srv.totalOrders > c.totalOrders) {
-        return {
-          ...srv,
-          tags: c.tags,
-          adminNotes: c.adminNotes,
-          giftHistory: c.giftHistory,
-          name: c.name || srv.name,
-        };
-      }
-      return c;
+    const incomingOrderIds = new Set((incoming.orders || []).map((o) => o.id));
+    const brandNewPublicOrders: SaleOrder[] = (server.orders || []).filter((o) => {
+      if (incomingOrderIds.has(o.id) || deletedOrders.has(o.id)) return false;
+      const createdMs = new Date(o.createdAt).getTime();
+      return !Number.isNaN(createdMs) && nowMs - createdMs < 12000;
     });
-  const serverOnlyCustomers = server.customers.filter(
-    (c) => !incomingCustomerIds.has(c.id) && !deletedCustomers.has(c.id)
-  );
 
-  return {
-    ...incoming,
-    orders: [...serverOnlyOrders, ...incoming.orders.filter((o) => !deletedOrders.has(o.id))].sort(
-      (a, b) => b.createdAt.localeCompare(a.createdAt)
-    ),
-    customers: [...serverOnlyCustomers, ...mergedCustomers],
-  };
+    const incomingCustomerIds = new Set((incoming.customers || []).map((c) => c.id));
+    const brandNewPublicCustomers: CustomerProfile[] = (server.customers || []).filter((c) => {
+      if (incomingCustomerIds.has(c.id) || deletedCustomers.has(c.id)) return false;
+      const createdMs = new Date(c.createdAt).getTime();
+      return !Number.isNaN(createdMs) && nowMs - createdMs < 12000;
+    });
+
+    return {
+      ...incoming,
+      orders: [
+        ...brandNewPublicOrders,
+        ...(incoming.orders || []).filter((o) => !deletedOrders.has(o.id)),
+      ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      customers: [
+        ...brandNewPublicCustomers,
+        ...(incoming.customers || []).filter((c) => !deletedCustomers.has(c.id)),
+      ],
+    };
+  }
+
+  return incoming;
 }
 
 /**
- * Fixed-window rate limiter. Uses Postgres when available (shared across all serverless
- * instances), otherwise falls back to per-instance memory.
- * Returns true when the request is allowed.
+ * Fixed-window rate limiter.
  */
 export async function checkRateLimit(
   key: string,
