@@ -13,6 +13,7 @@ import { AppDatabaseState } from '@/lib/types';
 import {
   BarChart3,
   Calculator,
+  Check,
   ChefHat,
   Eye,
   EyeOff,
@@ -23,11 +24,12 @@ import {
   Package,
   Receipt,
   RefreshCw,
+  Save,
   ShieldCheck,
   ShoppingBag,
   Users,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type AdminTabId =
   | 'overview'
@@ -49,9 +51,14 @@ export default function AdminManagementPage() {
   const [state, setState] = useState<AppDatabaseState>(INITIAL_STATE);
   const [activeTab, setActiveTab] = useState<AdminTabId>('overview');
   const [saving, setSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [hasCloudDb, setHasCloudDb] = useState(false);
-  const initialLoaded = useRef(false);
+
+  const latestStateRef = useRef<AppDatabaseState>(INITIAL_STATE);
   const savingRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch('/api/auth')
@@ -59,20 +66,68 @@ export default function AdminManagementPage() {
       .then((d) => {
         setAuthenticated(Boolean(d.authenticated));
         if (d.authenticated) {
-          loadServerState();
+          loadServerState(false);
         }
       })
       .catch(() => setAuthenticated(false));
   }, []);
 
-  // Poll every 15s for new incoming customer orders while authenticated
+  const persistToServer = useCallback(async (stateToSave?: AppDatabaseState) => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+
+    const payload = stateToSave || latestStateRef.current;
+    setSaving(true);
+    savingRef.current = true;
+    dirtyRef.current = false;
+
+    try {
+      const res = await fetch('/api/admin/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: payload }),
+      });
+      if (res.ok) {
+        // IMPORTANTE: Nunca sobrescrever o state local com a resposta do servidor durante a edição,
+        // para jamais interromper a digitação ou mover o cursor do usuário.
+        if (!dirtyRef.current) {
+          setHasUnsavedChanges(false);
+        }
+        setLastSavedAt(
+          new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        );
+      }
+    } catch {
+      // Se falhar, mantém dirty para tentar novamente
+      setHasUnsavedChanges(true);
+    } finally {
+      setSaving(false);
+      savingRef.current = false;
+    }
+  }, []);
+
+  // Atalho Ctrl+S / Cmd+S para salvar imediatamente
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        persistToServer(latestStateRef.current);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [persistToServer]);
+
+  // Poll silencioso a cada 20s APENAS para novos pedidos de clientes, e somente quando o usuário NÃO está digitando
   useEffect(() => {
     if (!authenticated) return;
     const interval = setInterval(() => {
-      if (!savingRef.current) {
+      if (!savingRef.current && !dirtyRef.current) {
         loadServerState(true);
       }
-    }, 15000);
+    }, 20000);
     return () => clearInterval(interval);
   }, [authenticated]);
 
@@ -83,17 +138,31 @@ export default function AdminManagementPage() {
         const data = await res.json();
         if (data.state) {
           if (!silent) {
+            latestStateRef.current = data.state;
             setState(data.state);
-          } else {
-            // Merge live incoming orders and customers without interrupting form typing
-            setState((prev) => ({
-              ...prev,
-              orders: data.state.orders || prev.orders,
-              customers: data.state.customers || prev.customers,
-            }));
+            setHasUnsavedChanges(false);
+            dirtyRef.current = false;
+          } else if (!dirtyRef.current && !savingRef.current) {
+            // No modo silencioso, atualiza somente se o número de pedidos mudou, sem tocar nos produtos/insumos em edição
+            setState((prev) => {
+              const serverOrders = data.state.orders || [];
+              const serverCustomers = data.state.customers || [];
+              if (
+                serverOrders.length === prev.orders.length &&
+                serverCustomers.length === prev.customers.length
+              ) {
+                return prev;
+              }
+              const merged = {
+                ...prev,
+                orders: serverOrders,
+                customers: serverCustomers,
+              };
+              latestStateRef.current = merged;
+              return merged;
+            });
           }
           setHasCloudDb(Boolean(data.hasCloudDb));
-          initialLoaded.current = true;
         }
       } else if (res.status === 401) {
         setAuthenticated(false);
@@ -106,32 +175,20 @@ export default function AdminManagementPage() {
   function handleUpdateState(updater: (prev: AppDatabaseState) => AppDatabaseState) {
     setState((prev) => {
       const next = updater(prev);
-      persistToServer(next);
+      latestStateRef.current = next;
+      dirtyRef.current = true;
+      setHasUnsavedChanges(true);
+
+      // Debounce: aguarda 1.8s após o usuário parar de digitar antes de salvar em segundo plano
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        persistToServer(latestStateRef.current);
+      }, 1800);
+
       return next;
     });
-  }
-
-  async function persistToServer(nextState: AppDatabaseState) {
-    setSaving(true);
-    savingRef.current = true;
-    try {
-      const res = await fetch('/api/admin/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: nextState }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.state) {
-          setState(data.state);
-        }
-      }
-    } catch {
-      // ignore
-    } finally {
-      setSaving(false);
-      savingRef.current = false;
-    }
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -148,7 +205,7 @@ export default function AdminManagementPage() {
       if (res.ok && data.authenticated) {
         setAuthenticated(true);
         setPinInput('');
-        loadServerState();
+        loadServerState(false);
       } else {
         setAuthError(data.error || 'Credencial inválida.');
       }
@@ -160,6 +217,9 @@ export default function AdminManagementPage() {
   }
 
   async function handleLogout() {
+    if (dirtyRef.current) {
+      await persistToServer(latestStateRef.current);
+    }
     await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -324,9 +384,22 @@ export default function AdminManagementPage() {
                 <span className="text-xs font-bold text-zinc-100 tracking-tight">
                   {state.settings.storeName} — Gestão
                 </span>
-                <span className="px-1.5 py-0.2 rounded text-[10px] text-orange-400 bg-orange-500/10 border border-orange-500/20 font-medium">
-                  {saving ? 'Salvando...' : hasCloudDb ? 'Nuvem ativa' : 'Sincronizado'}
-                </span>
+                {hasUnsavedChanges ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] text-amber-300 bg-amber-500/15 border border-amber-500/30 font-medium">
+                    Editando...
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-medium inline-flex items-center gap-1">
+                    <Check className="size-2.5" />
+                    {saving
+                      ? 'Salvando...'
+                      : lastSavedAt
+                      ? `Salvo às ${lastSavedAt}`
+                      : hasCloudDb
+                      ? 'Nuvem ativa'
+                      : 'Salvo'}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -334,9 +407,24 @@ export default function AdminManagementPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => persistToServer(latestStateRef.current)}
+              disabled={saving}
+              className={`px-3 py-1.5 rounded-[6px] text-xs font-semibold flex items-center gap-1.5 transition ${
+                hasUnsavedChanges
+                  ? 'bg-[#ff5400] hover:bg-[#ea4b00] text-white shadow-sm shadow-orange-500/30'
+                  : 'bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300'
+              }`}
+              title="Salvar alterações (Ctrl+S)"
+            >
+              <Save className="size-3.5" />
+              {saving ? 'Salvando...' : hasUnsavedChanges ? 'Salvar Agora' : 'Salvo'}
+            </button>
+
+            <button
+              type="button"
               onClick={() => loadServerState(false)}
               className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-400 hover:text-zinc-200 rounded-[6px]"
-              title="Atualizar dados agora"
+              title="Recarregar pedidos do servidor"
             >
               <RefreshCw className="size-3.5" />
             </button>
@@ -344,7 +432,7 @@ export default function AdminManagementPage() {
               href="/"
               target="_blank"
               rel="noreferrer"
-              className="btn-saas-secondary text-xs"
+              className="btn-saas-secondary text-xs hidden sm:inline-flex"
             >
               <ExternalLink className="size-3.5 text-zinc-400" />
               Abrir Cardápio Público
