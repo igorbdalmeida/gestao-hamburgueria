@@ -47,6 +47,7 @@ export interface Product {
   category: 'Hambúrgueres' | 'Bebidas' | 'Porções & Combos' | 'Sobremesas';
   channel: 'delivery' | 'geral';
   imageEmoji: string;
+  imageUrl?: string;
   recipe: RecipeItem[];
   // Pricing config (% as decimal, e.g. 0.15 = 15%)
   fixedCostPct: number;
@@ -111,6 +112,8 @@ export interface PaymentFeeConfig {
   deliveryFeeDefault: number;
   estimatedDeliveryMinutes: string;
   storeOpen: boolean;
+  adminPassword?: string;
+  geminiApiKey?: string;
 }
 
 export interface OrderItem {

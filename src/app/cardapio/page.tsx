@@ -8,19 +8,14 @@ import {
   Clock,
   Copy,
   CreditCard,
-  MapPin,
   MessageCircle,
   Minus,
-  Motorbike,
   Phone,
   Plus,
   QrCode,
   Search,
   ShoppingBag,
-  Sparkles,
   Star,
-  Store,
-  UtensilsCrossed,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -31,6 +26,7 @@ interface PublicMenuItem {
   description: string;
   category: 'Hambúrgueres' | 'Bebidas' | 'Porções & Combos' | 'Sobremesas';
   imageEmoji: string;
+  imageUrl?: string | null;
   price: number;
   featured: boolean;
 }
@@ -71,6 +67,11 @@ export default function CardapioVirtualPage() {
   // Cart: productId -> { quantity, notes }
   const [cart, setCart] = useState<Record<string, { quantity: number; notes: string }>>({});
   const [bagOpen, setBagOpen] = useState(false);
+
+  // Selected product modal (iFood style detail modal)
+  const [detailItem, setDetailItem] = useState<PublicMenuItem | null>(null);
+  const [detailQty, setDetailQty] = useState<number>(1);
+  const [detailNotes, setDetailNotes] = useState<string>('');
 
   // Customer identification
   const [phone, setPhone] = useState('');
@@ -164,7 +165,7 @@ export default function CardapioVirtualPage() {
     }
   }
 
-  function addToCart(productId: string, delta: number) {
+  function addToCart(productId: string, delta: number, customNotes?: string) {
     setCart((prev) => {
       const current = prev[productId]?.quantity || 0;
       const nextQty = Math.max(0, current + delta);
@@ -177,10 +178,29 @@ export default function CardapioVirtualPage() {
         ...prev,
         [productId]: {
           quantity: nextQty,
-          notes: prev[productId]?.notes || '',
+          notes: customNotes !== undefined ? customNotes : prev[productId]?.notes || '',
         },
       };
     });
+  }
+
+  function openProductDetail(item: PublicMenuItem) {
+    setDetailItem(item);
+    const existing = cart[item.id];
+    setDetailQty(existing ? existing.quantity : 1);
+    setDetailNotes(existing ? existing.notes : '');
+  }
+
+  function confirmProductDetail() {
+    if (!detailItem) return;
+    setCart((prev) => ({
+      ...prev,
+      [detailItem.id]: {
+        quantity: detailQty,
+        notes: detailNotes.trim(),
+      },
+    }));
+    setDetailItem(null);
   }
 
   const cartItemsList = useMemo(() => {
@@ -481,18 +501,22 @@ export default function CardapioVirtualPage() {
         <div className="space-y-3">
           {filteredMenu.map((item) => {
             const qtyInCart = cart[item.id]?.quantity || 0;
+            const itemNote = cart[item.id]?.notes || '';
 
             return (
               <div
                 key={item.id}
-                className="bg-[#121215] border border-white/[0.08] hover:border-white/[0.14] rounded-[10px] p-4 flex items-center justify-between gap-4 transition"
+                onClick={() => openProductDetail(item)}
+                className="bg-[#121215] border border-white/[0.08] hover:border-orange-500/30 rounded-[12px] p-4 flex items-center justify-between gap-4 transition cursor-pointer group"
               >
                 {/* Left: Product Information */}
                 <div className="space-y-1.5 flex-1 pr-2">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-zinc-100">{item.name}</h2>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-sm font-semibold text-zinc-100 group-hover:text-orange-400 transition-colors">
+                      {item.name}
+                    </h2>
                     {item.featured && (
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20">
                         Mais Pedido
                       </span>
                     )}
@@ -500,15 +524,34 @@ export default function CardapioVirtualPage() {
                   <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
                     {item.description}
                   </p>
+                  {itemNote && (
+                    <p className="text-[11px] text-orange-400/90 italic">
+                      Obs: {itemNote}
+                    </p>
+                  )}
                   <p className="text-sm font-semibold text-zinc-100 tabular-nums pt-1">
                     {formatBRL(item.price)}
                   </p>
                 </div>
 
-                {/* Right: Thumbnail with Quantity Selector */}
-                <div className="flex flex-col items-center gap-2 shrink-0">
-                  <div className="size-20 rounded-[8px] bg-[#18181c] border border-white/[0.08] flex items-center justify-center text-3xl">
-                    {item.imageEmoji}
+                {/* Right: Product Photo Thumbnail + Quantity Selector */}
+                <div
+                  className="flex flex-col items-center gap-2 shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    onClick={() => openProductDetail(item)}
+                    className="size-24 rounded-[10px] bg-[#18181c] border border-white/[0.08] overflow-hidden flex items-center justify-center text-3xl relative shadow-md"
+                  >
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <span>{item.imageEmoji}</span>
+                    )}
                   </div>
 
                   {qtyInCart > 0 ? (
@@ -548,6 +591,99 @@ export default function CardapioVirtualPage() {
           })}
         </div>
       </main>
+
+      {/* iFood-Style Product Detail Modal */}
+      {detailItem && (
+        <div
+          className="fixed inset-0 bg-black/75 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setDetailItem(null)}
+        >
+          <div
+            className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative h-56 bg-[#18181c] flex items-center justify-center">
+              {detailItem.imageUrl ? (
+                <img
+                  src={detailItem.imageUrl}
+                  alt={detailItem.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-6xl">{detailItem.imageEmoji}</span>
+              )}
+              <button
+                type="button"
+                aria-label="Fechar detalhes"
+                onClick={() => setDetailItem(null)}
+                className="absolute top-3 right-3 size-8 rounded-full bg-black/70 text-zinc-200 hover:text-white flex items-center justify-center"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-base font-bold text-zinc-100">{detailItem.name}</h3>
+                  <span className="text-base font-bold text-orange-400 tabular-nums shrink-0">
+                    {formatBRL(detailItem.price)}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
+                  {detailItem.description}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-300 font-medium block mb-1.5">
+                  Alguma observação neste item?
+                </label>
+                <input
+                  type="text"
+                  value={detailNotes}
+                  onChange={(e) => setDetailNotes(e.target.value)}
+                  placeholder="Ex: Sem cebola, ponto bem passado, maionese à parte..."
+                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[8px] px-3 py-2 text-xs text-zinc-100 outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <div className="flex items-center gap-2 bg-[#18181c] border border-white/[0.12] rounded-[8px] p-1">
+                  <button
+                    type="button"
+                    onClick={() => setDetailQty((q) => Math.max(1, q - 1))}
+                    className="size-8 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
+                  >
+                    <Minus className="size-3.5" />
+                  </button>
+                  <span className="w-6 text-center text-xs font-bold text-zinc-100 tabular-nums">
+                    {detailQty}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDetailQty((q) => q + 1)}
+                    className="size-8 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={confirmProductDetail}
+                  className="flex-1 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center justify-between px-4 shadow-lg shadow-orange-500/25 transition"
+                >
+                  <span>Adicionar</span>
+                  <span className="tabular-nums font-bold">
+                    {formatBRL(detailItem.price * detailQty)}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* iFood-Style Sticky Bottom Bag Bar ("Ver Sacola") */}
       {totalCartItems > 0 && (
@@ -599,14 +735,26 @@ export default function CardapioVirtualPage() {
 
             <form onSubmit={handleSubmitOrder} className="space-y-4 text-xs">
               {/* Items in cart */}
-              <div className="space-y-2 border-b border-white/[0.08] pb-3 tabular-nums">
+              <div className="space-y-2.5 border-b border-white/[0.08] pb-3 tabular-nums">
                 {cartItemsList.map((item) => (
                   <div key={item.id} className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-zinc-100">{item.name}</p>
-                      <p className="text-[11px] text-zinc-400">
-                        {item.quantity}x {formatBRL(item.price)}
-                      </p>
+                    <div className="flex items-center gap-2.5">
+                      <div className="size-10 rounded-[6px] bg-[#18181c] border border-white/[0.08] overflow-hidden flex items-center justify-center shrink-0">
+                        {item.imageUrl ? (
+                          <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-base">{item.imageEmoji}</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-medium text-zinc-100">{item.name}</p>
+                        <p className="text-[11px] text-zinc-400">
+                          {item.quantity}x {formatBRL(item.price)}
+                        </p>
+                        {item.notes && (
+                          <p className="text-[10px] text-orange-400 italic">Obs: {item.notes}</p>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -663,7 +811,7 @@ export default function CardapioVirtualPage() {
                 </div>
                 {recognized && (
                   <p className="text-[11px] text-emerald-400">
-                    Número reconhecido. Endereço preenchido automaticamente.
+                    Cliente reconhecido! Confira seu endereço abaixo.
                   </p>
                 )}
               </div>
@@ -773,13 +921,13 @@ export default function CardapioVirtualPage() {
               {/* Order Notes */}
               <div>
                 <label className="text-zinc-400 block mb-1">
-                  Observações (ex: ponto da carne, sem cebola, troco)
+                  Observações gerais do pedido (ex: troco para R$ 50, tocar interfone)
                 </label>
                 <input
                   type="text"
                   value={customerNotes}
                   onChange={(e) => setCustomerNotes(e.target.value)}
-                  placeholder="Alguma observação especial?"
+                  placeholder="Alguma observação na entrega?"
                   className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
                 />
               </div>

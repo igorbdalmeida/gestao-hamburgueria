@@ -1,5 +1,6 @@
 'use client';
 
+import { compressImageFile } from '@/lib/image-utils';
 import { formatBRL } from '@/lib/pricing';
 import {
   AppDatabaseState,
@@ -10,12 +11,16 @@ import {
 } from '@/lib/types';
 import { parseNfeXml, SAMPLE_NFE_XML } from '@/lib/xml-parser';
 import {
+  AlertCircle,
+  Camera,
   CheckCircle2,
   FileCode2,
   FilePlus2,
-  FileText,
+  Image as ImageIcon,
+  Sparkles,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -25,7 +30,7 @@ interface Props {
 }
 
 export default function InvoicesTab({ state, onUpdateState }: Props) {
-  const [entryMode, setEntryMode] = useState<'manual' | 'xml' | 'ia'>('xml');
+  const [entryMode, setEntryMode] = useState<'ia' | 'xml' | 'manual'>('ia');
 
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [supplier, setSupplier] = useState('');
@@ -45,10 +50,15 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
   const [usageUnit, setUsageUnit] = useState<UsageUnit>('g');
   const [unitPrice, setUnitPrice] = useState('34.00');
 
+  // Photo & Text AI Scanner state (no API key input in UI!)
+  const [receiptPhotoPreview, setReceiptPhotoPreview] = useState<string | null>(null);
+  const [receiptBase64, setReceiptBase64] = useState<string>('');
+  const [receiptMimeType, setReceiptMimeType] = useState<string>('image/jpeg');
   const [aiRawText, setAiRawText] = useState('');
-  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [showTextInput, setShowTextInput] = useState(false);
   const [parsingAi, setParsingAi] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   function findBestMatchingIngredientId(rawName: string): string | undefined {
     const clean = rawName.toLowerCase();
@@ -61,7 +71,9 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
         (clean.includes('cheddar') && clean.includes('barra') && ingName.includes('queijo cheddar')) ||
         (clean.includes('aneis') && ingName.includes('aneis')) ||
         (clean.includes('brioche') && ingName.includes('brioche')) ||
-        (clean.includes('kraft') && ingName.includes('kraft'))
+        (clean.includes('kraft') && ingName.includes('kraft')) ||
+        (clean.includes('acoplado') && ingName.includes('acoplado')) ||
+        (clean.includes('bacon') && ingName.includes('bacon'))
       );
     });
     return match?.id;
@@ -105,6 +117,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
 
   function handleParseXmlContent(rawXml: string) {
     if (!rawXml.trim()) return;
+    setErrorMessage(null);
     const parsed = parseNfeXml(rawXml);
     setSupplier(parsed.supplier);
     setDate(parsed.date);
@@ -141,55 +154,112 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
     reader.readAsText(file);
   }
 
-  async function handleParseWithAiOrSmartText() {
-    if (!aiRawText.trim()) return;
+  async function handleReceiptPhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 1400,
+        maxHeight: 1400,
+        quality: 0.85,
+      });
+      setReceiptPhotoPreview(compressed.dataUrl);
+      setReceiptBase64(compressed.base64);
+      setReceiptMimeType(compressed.mimeType);
+    } catch {
+      setErrorMessage('Não foi possível carregar esta imagem. Tente outro arquivo.');
+    }
+  }
+
+  async function handleParseWithAi() {
+    if (!receiptBase64 && !aiRawText.trim()) {
+      setErrorMessage('Envie uma foto da nota/cupom ou cole os itens para ler com a IA.');
+      return;
+    }
     setParsingAi(true);
     setStatusMessage(null);
+    setErrorMessage(null);
+
     try {
       const res = await fetch('/api/admin/parse-receipt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rawText: aiRawText,
-          apiKey: geminiApiKey.trim() || undefined,
+          rawText: aiRawText.trim() || undefined,
+          imageBase64: receiptBase64 || undefined,
+          mimeType: receiptMimeType || undefined,
         }),
       });
       const data = await res.json();
-      if (data.ok && data.invoice) {
+      if (res.ok && data.ok && data.invoice) {
         const inv = data.invoice;
         setSupplier(inv.supplier || 'Fornecedor');
         setDate(inv.date || new Date().toISOString().slice(0, 10));
-        setInvoiceNumber(inv.invoiceNumber || 'CUPOM');
+        setInvoiceNumber(inv.invoiceNumber || `CUPOM-${Math.floor(1000 + Math.random() * 9000)}`);
         if (inv.paymentMethod) setPaymentMethod(inv.paymentMethod);
 
         const mapped: InvoiceItem[] = (inv.items || []).map(
-          (it: Record<string, unknown>, idx: number) => ({
-            id: `aiitem-${Date.now()}-${idx}`,
-            ingredientId: findBestMatchingIngredientId(String(it.name || '')),
-            name: String(it.name || 'Item'),
-            category: (it.category as IngredientCategory) || 'Outros',
-            packageDescription: String(it.packageDescription || 'Pacote'),
-            quantity: Number(it.quantity) || 1,
-            contentPerPackage: Number(it.contentPerPackage) || 1000,
-            usageUnit: (it.usageUnit as UsageUnit) || 'g',
-            unitPrice: Number(it.unitPrice) || 0,
-            totalPrice: Number(it.totalPrice) || 0,
-          })
+          (it: Record<string, unknown>, idx: number) => {
+            const q = Number(it.quantity) || 1;
+            const up = Number(it.unitPrice) || 0;
+            return {
+              id: `aiitem-${Date.now()}-${idx}`,
+              ingredientId: findBestMatchingIngredientId(String(it.name || '')),
+              name: String(it.name || 'Item'),
+              category: (it.category as IngredientCategory) || 'Outros',
+              packageDescription: String(it.packageDescription || 'Pacote'),
+              quantity: q,
+              contentPerPackage: Number(it.contentPerPackage) || 1000,
+              usageUnit: (it.usageUnit as UsageUnit) || 'g',
+              unitPrice: up,
+              totalPrice: Number(it.totalPrice) || Number((q * up).toFixed(2)),
+            };
+          }
         );
 
         setDraftItems(mapped);
-        setStatusMessage(`Itens extraídos (${mapped.length}). Revise abaixo e confirme.`);
+        setStatusMessage(
+          `Leitura concluída! ${mapped.length} ${
+            mapped.length === 1 ? 'item identificado' : 'itens identificados'
+          }. Revise na tabela abaixo e clique em Salvar Nota Fiscal.`
+        );
+      } else {
+        setErrorMessage(
+          data.error || 'Não foi possível extrair os itens automaticamente. Tente uma foto mais nítida.'
+        );
       }
     } catch {
-      alert('Erro ao processar texto do cupom.');
+      setErrorMessage('Falha de conexão ao processar a nota fiscal.');
     } finally {
       setParsingAi(false);
     }
   }
 
+  function handleUpdateDraftItem(
+    idx: number,
+    patch: Partial<Pick<InvoiceItem, 'name' | 'ingredientId' | 'quantity' | 'contentPerPackage' | 'unitPrice'>>
+  ) {
+    setDraftItems((prev) =>
+      prev.map((row, i) => {
+        if (i !== idx) return row;
+        const nextQty = patch.quantity !== undefined ? patch.quantity : row.quantity;
+        const nextPrice = patch.unitPrice !== undefined ? patch.unitPrice : row.unitPrice;
+        return {
+          ...row,
+          ...patch,
+          quantity: nextQty,
+          unitPrice: nextPrice,
+          totalPrice: Number((nextQty * nextPrice).toFixed(2)),
+        };
+      })
+    );
+  }
+
   function handleSaveInvoice() {
     if (draftItems.length === 0) {
-      alert('Adicione ao menos 1 item antes de salvar.');
+      setErrorMessage('Adicione ou extraia ao menos 1 item antes de salvar.');
       return;
     }
 
@@ -270,7 +340,19 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
     setDraftItems([]);
     setSupplier('');
     setInvoiceNumber('');
-    setStatusMessage('Nota fiscal salva e custos de insumos atualizados.');
+    setReceiptPhotoPreview(null);
+    setReceiptBase64('');
+    setAiRawText('');
+    setErrorMessage(null);
+    setStatusMessage('Nota fiscal salva e custos de insumos atualizados com sucesso!');
+  }
+
+  function handleDeleteInvoice(invoiceId: string) {
+    if (!confirm('Deseja excluir este registro de nota fiscal do histórico?')) return;
+    onUpdateState((prev) => ({
+      ...prev,
+      invoices: prev.invoices.filter((inv) => inv.id !== invoiceId),
+    }));
   }
 
   const expenseMetrics = useMemo(() => {
@@ -298,7 +380,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Notas Fiscais e Compras</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Registro de entradas com atualização automática do catálogo de insumos.
+            Envie foto do cupom para leitura por IA, importe XML ou lance manualmente com atualização automática de custos.
           </p>
         </div>
       </div>
@@ -318,7 +400,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
           </p>
         </div>
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4">
-          <p className="text-xs text-zinc-400">Média por Compra</p>
+          <p className="text-xs text-zinc-400">Média por Item</p>
           <p className="text-2xl font-semibold text-zinc-100 mt-1">
             {formatBRL(expenseMetrics.avgPerPurchase)}
           </p>
@@ -334,30 +416,30 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
       {/* Entry Form Card */}
       <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/[0.08]">
-          <h2 className="text-sm font-semibold text-zinc-100">Nova Entrada</h2>
+          <h2 className="text-sm font-semibold text-zinc-100">Registrar Nova Compra / Nota</h2>
 
           <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEntryMode('ia')}
+              className={`px-3 py-1.5 rounded-[6px] text-xs font-medium flex items-center gap-1.5 transition ${
+                entryMode === 'ia'
+                  ? 'bg-[#ff5400] text-white'
+                  : 'bg-[#18181c] text-zinc-300 border border-white/[0.08] hover:text-white'
+              }`}
+            >
+              <Camera className="size-3.5" /> Foto da Nota / Leitura IA
+            </button>
             <button
               type="button"
               onClick={() => setEntryMode('xml')}
               className={`px-3 py-1.5 rounded-[6px] text-xs font-medium flex items-center gap-1.5 transition ${
                 entryMode === 'xml'
                   ? 'bg-zinc-100 text-zinc-950'
-                  : 'bg-[#18181c] text-zinc-300 border border-white/[0.08]'
+                  : 'bg-[#18181c] text-zinc-300 border border-white/[0.08] hover:text-white'
               }`}
             >
               <FileCode2 className="size-3.5" /> Importar XML (NF-e / NFC-e)
-            </button>
-            <button
-              type="button"
-              onClick={() => setEntryMode('ia')}
-              className={`px-3 py-1.5 rounded-[6px] text-xs font-medium flex items-center gap-1.5 transition ${
-                entryMode === 'ia'
-                  ? 'bg-zinc-100 text-zinc-950'
-                  : 'bg-[#18181c] text-zinc-300 border border-white/[0.08]'
-              }`}
-            >
-              <FileText className="size-3.5" /> Extrair de Texto / Cupom
             </button>
             <button
               type="button"
@@ -365,7 +447,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
               className={`px-3 py-1.5 rounded-[6px] text-xs font-medium flex items-center gap-1.5 transition ${
                 entryMode === 'manual'
                   ? 'bg-zinc-100 text-zinc-950'
-                  : 'bg-[#18181c] text-zinc-300 border border-white/[0.08]'
+                  : 'bg-[#18181c] text-zinc-300 border border-white/[0.08] hover:text-white'
               }`}
             >
               <FilePlus2 className="size-3.5" /> Lançamento Manual
@@ -380,10 +462,139 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
           </div>
         )}
 
+        {errorMessage && (
+          <div className="bg-rose-500/10 border border-rose-500/20 rounded-[8px] p-3 text-xs text-rose-300 flex items-center gap-2">
+            <AlertCircle className="size-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Mode 1: Photo & AI Scanner (No API key input cluttering the page!) */}
+        {entryMode === 'ia' && (
+          <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-4 space-y-4 text-xs">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-4 text-orange-400" />
+                  <span className="font-semibold text-zinc-100 text-sm">
+                    Leitor Inteligente de Notas e Cupons Fiscais
+                  </span>
+                </div>
+                <p className="text-zinc-400">
+                  Tire uma foto do cupom fiscal pelo celular ou envie a imagem da nota para extrair o local, a data e todos os itens automaticamente.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <label className="btn-monster-primary cursor-pointer">
+                  <Camera className="size-4" />
+                  <span>{receiptPhotoPreview ? 'Trocar Foto da Nota' : 'Tirar Foto / Escolher Imagem'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleReceiptPhotoSelect}
+                    className="hidden"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setShowTextInput((prev) => !prev)}
+                  className="btn-saas-secondary"
+                >
+                  {showTextInput ? 'Ocultar Texto' : 'Colar Texto / Lista'}
+                </button>
+              </div>
+            </div>
+
+            {/* Receipt Photo Preview */}
+            {receiptPhotoPreview && (
+              <div className="bg-[#09090b] border border-white/[0.1] rounded-[8px] p-3 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={receiptPhotoPreview}
+                    alt="Prévia da Nota Fiscal"
+                    className="w-20 h-24 object-cover rounded-[6px] border border-white/[0.15]"
+                  />
+                  <div className="space-y-1">
+                    <p className="font-medium text-zinc-100 flex items-center gap-1.5">
+                      <ImageIcon className="size-3.5 text-orange-400" /> Imagem da nota pronta para leitura
+                    </p>
+                    <p className="text-zinc-400 text-[11px]">
+                      Clique em &ldquo;Ler Nota com IA&rdquo; para extrair a lista de produtos e preços.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReceiptPhotoPreview(null);
+                        setReceiptBase64('');
+                      }}
+                      className="text-rose-400 hover:underline text-[11px] inline-flex items-center gap-1"
+                    >
+                      <X className="size-3" /> Remover foto
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={parsingAi}
+                  onClick={handleParseWithAi}
+                  className="btn-monster-primary w-full sm:w-auto px-5 py-2.5"
+                >
+                  <Sparkles className="size-4" />
+                  {parsingAi ? 'Lendo Nota Fiscal...' : 'Ler Nota com IA'}
+                </button>
+              </div>
+            )}
+
+            {/* Optional Collapsible Text Input for pasted receipts / WhatsApp supplier lists */}
+            {showTextInput && (
+              <div className="space-y-2.5 pt-2 border-t border-white/[0.06]">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-zinc-300">
+                    Colar linhas do cupom ou orçamento de fornecedor (WhatsApp)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAiRawText(
+                        `FORNECEDOR: Atacadão Distribuidor\n2x Blend de Carne 1kg R$ 33,90\n1x Queijo Cheddar Barra 1kg R$ 53,50\n1x Saco Kraft Delivery 100un R$ 78,00`
+                      )
+                    }
+                    className="text-zinc-400 hover:text-zinc-200 underline"
+                  >
+                    Preencher exemplo
+                  </button>
+                </div>
+                <textarea
+                  rows={3}
+                  value={aiRawText}
+                  onChange={(e) => setAiRawText(e.target.value)}
+                  placeholder="Ex: 2x Blend de Carne 1kg R$ 34,00..."
+                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] p-3 text-zinc-100 font-mono"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={parsingAi}
+                    onClick={handleParseWithAi}
+                    className="btn-monster-primary"
+                  >
+                    <Sparkles className="size-3.5" />
+                    {parsingAi ? 'Extraindo...' : 'Extrair Itens com IA'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Mode 2: XML Upload */}
         {entryMode === 'xml' && (
           <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="text-xs">
-              <p className="font-medium text-zinc-200">Arquivo XML da Nota Fiscal</p>
+              <p className="font-medium text-zinc-200">Arquivo XML da Nota Fiscal (NF-e / NFC-e)</p>
               <p className="text-zinc-400 mt-0.5">
                 Carrega fornecedor, data, itens, quantidades e valores automaticamente.
               </p>
@@ -409,51 +620,6 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
           </div>
         )}
 
-        {entryMode === 'ia' && (
-          <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-4 space-y-3 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-zinc-200">
-                Texto do Cupom ou Lista de Compras
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  setAiRawText(
-                    `FORNECEDOR: Atacadão Distribuidor\n2x Blend de Carne 1kg R$ 33,90\n1x Queijo Cheddar Barra 1kg R$ 53,50\n1x Saco Kraft Delivery 100un R$ 78,00`
-                  )
-                }
-                className="text-zinc-400 hover:text-zinc-200 underline"
-              >
-                Preencher exemplo
-              </button>
-            </div>
-            <textarea
-              rows={3}
-              value={aiRawText}
-              onChange={(e) => setAiRawText(e.target.value)}
-              placeholder="Cole aqui as linhas do cupom fiscal..."
-              className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] p-3 text-zinc-100 font-mono"
-            />
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <input
-                type="password"
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                placeholder="Chave API Gemini (opcional)"
-                className="w-full sm:w-80 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-300"
-              />
-              <button
-                type="button"
-                disabled={parsingAi}
-                onClick={handleParseWithAiOrSmartText}
-                className="btn-saas-primary w-full sm:w-auto"
-              >
-                {parsingAi ? 'Processando...' : 'Extrair Itens'}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Header Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div>
@@ -471,7 +637,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
               type="text"
               value={supplier}
               onChange={(e) => setSupplier(e.target.value)}
-              placeholder="Ex: Atacadão, Distribuidora..."
+              placeholder="Ex: Atacadão, Assaí, Distribuidora..."
               className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
             />
           </div>
@@ -558,16 +724,17 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
           </button>
         </form>
 
-        {/* Draft Items Table */}
+        {/* Editable Draft Items Table */}
         {draftItems.length > 0 && (
           <div className="space-y-3">
             <div className="overflow-x-auto border border-white/[0.1] rounded-[8px]">
               <table className="w-full text-left text-xs tabular-nums">
                 <thead className="bg-[#18181c] text-zinc-400 border-b border-white/[0.08]">
                   <tr>
-                    <th className="py-2 px-3 font-medium">Item</th>
+                    <th className="py-2 px-3 font-medium">Item Extraído / Lançado</th>
                     <th className="py-2 px-3 font-medium">Insumo Vinculado</th>
                     <th className="py-2 px-3 font-medium text-center">Qtd</th>
+                    <th className="py-2 px-3 font-medium text-center">Conteúdo</th>
                     <th className="py-2 px-3 font-medium text-right">Preço Unit.</th>
                     <th className="py-2 px-3 font-medium text-right">Total</th>
                     <th className="py-2 px-2 text-center" />
@@ -576,21 +743,25 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                 <tbody className="divide-y divide-white/[0.06]">
                   {draftItems.map((it, idx) => (
                     <tr key={it.id}>
-                      <td className="py-2 px-3 text-zinc-200 font-medium">{it.name}</td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={it.name}
+                          onChange={(e) => handleUpdateDraftItem(idx, { name: e.target.value })}
+                          className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-zinc-100"
+                        />
+                      </td>
                       <td className="py-2 px-3">
                         <select
                           value={it.ingredientId || ''}
-                          onChange={(e) => {
-                            const val = e.target.value || undefined;
-                            setDraftItems((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, ingredientId: val } : row
-                              )
-                            );
-                          }}
+                          onChange={(e) =>
+                            handleUpdateDraftItem(idx, {
+                              ingredientId: e.target.value || undefined,
+                            })
+                          }
                           className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-zinc-200 text-xs"
                         >
-                          <option value="">Criar novo insumo</option>
+                          <option value="">+ Criar novo insumo</option>
                           {state.ingredients.map((ing) => (
                             <option key={ing.id} value={ing.id}>
                               {ing.name}
@@ -598,8 +769,48 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                           ))}
                         </select>
                       </td>
-                      <td className="py-2 px-3 text-center">{it.quantity}</td>
-                      <td className="py-2 px-3 text-right">{formatBRL(it.unitPrice)}</td>
+                      <td className="py-2 px-3 text-center">
+                        <input
+                          type="number"
+                          step="any"
+                          value={it.quantity}
+                          onChange={(e) =>
+                            handleUpdateDraftItem(idx, {
+                              quantity: parseFloat(e.target.value) || 0,
+                            })
+                          }
+                          className="w-16 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-center text-zinc-100"
+                        />
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <div className="inline-flex items-center gap-1">
+                          <input
+                            type="number"
+                            step="any"
+                            value={it.contentPerPackage}
+                            onChange={(e) =>
+                              handleUpdateDraftItem(idx, {
+                                contentPerPackage: parseFloat(e.target.value) || 1,
+                              })
+                            }
+                            className="w-20 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-center text-zinc-100"
+                          />
+                          <span className="text-zinc-500">{it.usageUnit}</span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={it.unitPrice}
+                          onChange={(e) =>
+                            handleUpdateDraftItem(idx, {
+                              unitPrice: parseFloat(e.target.value) || 0,
+                            })
+                          }
+                          className="w-24 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-right text-zinc-100"
+                        />
+                      </td>
                       <td className="py-2 px-3 text-right font-medium text-zinc-100">
                         {formatBRL(it.totalPrice)}
                       </td>
@@ -627,14 +838,14 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                   type="checkbox"
                   checked={updateIngredientPrices}
                   onChange={(e) => setUpdateIngredientPrices(e.target.checked)}
-                  className="accent-zinc-200"
+                  className="accent-orange-500"
                 />
-                Atualizar custo dos insumos vinculados e recalcular CMV das fichas técnicas
+                Atualizar automaticamente o preço dos insumos e recalcular o CMV dos lanches
               </label>
               <button
                 type="button"
                 onClick={handleSaveInvoice}
-                className="btn-saas-primary"
+                className="btn-monster-primary"
               >
                 Salvar Nota Fiscal ({formatBRL(draftItems.reduce((a, b) => a + b.totalPrice, 0))})
               </button>
@@ -645,9 +856,9 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
 
       {/* Purchase History Table */}
       <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/[0.08]">
+        <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
           <h3 className="text-xs font-semibold text-zinc-200">
-            Histórico de Compras Registradas
+            Histórico de Compras Registradas ({state.invoices.length} notas)
           </h3>
         </div>
         <div className="overflow-x-auto">
@@ -662,6 +873,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                 <th className="py-3 px-3 font-medium text-right">Preço Unit.</th>
                 <th className="py-3 px-3 font-medium text-right">Total</th>
                 <th className="py-3 px-4 font-medium text-center">Pagamento</th>
+                <th className="py-3 px-3 font-medium text-center">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.06]">
@@ -682,6 +894,16 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                     <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-300 text-[11px]">
                       {item.paymentMethod}
                     </span>
+                  </td>
+                  <td className="py-2.5 px-3 text-center">
+                    <button
+                      type="button"
+                      title="Excluir nota fiscal"
+                      onClick={() => handleDeleteInvoice(item.invoiceId)}
+                      className="text-zinc-500 hover:text-rose-400 p-1"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -1,7 +1,16 @@
-import { loadAppState, saveAppState } from '@/lib/db';
+import { checkRateLimit, getClientIp, loadAppState, saveAppState } from '@/lib/db';
 import { calculateProductMetrics, normalizePhone } from '@/lib/pricing';
+import {
+  CUSTOMER_COOKIE_NAME,
+  CUSTOMER_SESSION_MAX_AGE,
+  signSession,
+  verifySession,
+} from '@/lib/session';
 import { CustomerProfile, OrderItem, OrderPaymentMethod, SaleOrder } from '@/lib/types';
+import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 
 // GET: Returns ONLY public menu items, store public info, or looks up a customer by phone for 1-click checkout
 export async function GET(request: Request) {
@@ -22,17 +31,14 @@ export async function GET(request: Request) {
       return NextResponse.json({ found: false });
     }
 
-    // Record menu visit in customer history silently
-    customer.lastSeenAt = new Date().toISOString();
-    customer.activities.unshift({
-      id: `act-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      type: 'acesso_cardapio',
-      description: 'Acessou o Cardápio Virtual e foi reconhecido automaticamente pelo telefone',
-    });
-    await saveAppState(state);
+    // Check if this browser owns a verified session cookie for this phone number
+    const cookieStore = await cookies();
+    const customerToken = cookieStore.get(CUSTOMER_COOKIE_NAME)?.value;
+    const verifiedSession = await verifySession(customerToken, 'customer');
+    const isVerifiedDevice =
+      verifiedSession?.sub === normalizePhone(customer.phone) ||
+      verifiedSession?.sub === cleanPhone;
 
-    // Return ONLY what the customer needs to prefill their checkout (no internal notes or CMV!)
     const favoriteItemIds = Object.entries(customer.itemFrequency || {})
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 2)
@@ -43,8 +49,10 @@ export async function GET(request: Request) {
       customer: {
         name: customer.name,
         phone: customer.phone,
-        lastAddress: customer.addresses[0] || null,
-        preferredPaymentMethod: customer.preferredPaymentMethod || 'PIX (Mercado Pago / Chave)',
+        // Only prefill full street address if the device holds the signed customer cookie
+        lastAddress: isVerifiedDevice ? customer.addresses[0] || null : null,
+        preferredPaymentMethod:
+          customer.preferredPaymentMethod || 'PIX (Mercado Pago / Chave)',
         totalOrders: customer.totalOrders,
         favoriteItemIds,
       },
@@ -60,6 +68,7 @@ export async function GET(request: Request) {
       description: p.description,
       category: p.category,
       imageEmoji: p.imageEmoji,
+      imageUrl: p.imageUrl || null,
       price: p.practicedPrice,
       featured: Boolean(p.featured),
     }));
@@ -82,6 +91,15 @@ export async function GET(request: Request) {
 // POST: Customer places an order on the public virtual menu
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
+    const allowed = await checkRateLimit(`order:ip:${ip}`, 15, 10 * 60);
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Muitas solicitações seguidas. Aguarde um instante.' },
+        { status: 429 }
+      );
+    }
+
     const body = await request.json();
     const {
       customerName,
@@ -106,7 +124,12 @@ export async function POST(request: Request) {
     };
 
     const cleanPhone = normalizePhone(customerPhone || '');
-    if (!customerName?.trim() || cleanPhone.length < 8 || !Array.isArray(items) || items.length === 0) {
+    if (
+      !customerName?.trim() ||
+      cleanPhone.length < 8 ||
+      !Array.isArray(items) ||
+      items.length === 0
+    ) {
       return NextResponse.json(
         { error: 'Preencha seu nome, telefone e escolha pelo menos 1 item.' },
         { status: 400 }
@@ -114,6 +137,13 @@ export async function POST(request: Request) {
     }
 
     const state = await loadAppState();
+    if (!state.settings.storeOpen) {
+      return NextResponse.json(
+        { error: 'A loja está fechada para novos pedidos neste momento.' },
+        { status: 403 }
+      );
+    }
+
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.slice(0, 10);
 
@@ -124,9 +154,9 @@ export async function POST(request: Request) {
 
     for (const cartItem of items) {
       const product = state.products.find((p) => p.id === cartItem.productId);
-      if (!product) continue;
+      if (!product || !product.availableInMenu) continue;
       const metrics = calculateProductMetrics(product, state.ingredients);
-      const qty = Math.max(1, Number(cartItem.quantity) || 1);
+      const qty = Math.min(50, Math.max(1, Number(cartItem.quantity) || 1));
 
       orderItems.push({
         productId: product.id,
@@ -134,11 +164,18 @@ export async function POST(request: Request) {
         quantity: qty,
         unitPrice: product.practicedPrice,
         unitCmv: metrics.totalCmv,
-        notes: cartItem.notes,
+        notes: cartItem.notes ? String(cartItem.notes).slice(0, 200) : undefined,
       });
 
       subtotal += product.practicedPrice * qty;
       totalCmv += metrics.totalCmv * qty;
+    }
+
+    if (orderItems.length === 0) {
+      return NextResponse.json(
+        { error: 'Nenhum item válido selecionado.' },
+        { status: 400 }
+      );
     }
 
     const deliveryFee = state.settings.deliveryFeeDefault || 0;
@@ -169,7 +206,7 @@ export async function POST(request: Request) {
       customer = {
         id: `cust-${Date.now()}`,
         phone: cleanPhone,
-        name: customerName.trim(),
+        name: customerName.trim().slice(0, 80),
         createdAt: nowIso,
         lastSeenAt: nowIso,
         lastOrderAt: nowIso,
@@ -186,7 +223,7 @@ export async function POST(request: Request) {
       };
       state.customers.unshift(customer);
     } else {
-      customer.name = customerName.trim() || customer.name;
+      customer.name = customerName.trim().slice(0, 80) || customer.name;
       customer.lastSeenAt = nowIso;
       customer.lastOrderAt = nowIso;
       customer.preferredPaymentMethod = paymentMethod;
@@ -208,7 +245,6 @@ export async function POST(request: Request) {
     customer.totalSpent += totalAmount;
     customer.averageTicket = customer.totalSpent / customer.totalOrders;
 
-    // Update item frequencies & auto-tags
     for (const item of orderItems) {
       const prev = customer.itemFrequency[item.productId] || {
         productName: item.productName,
@@ -220,11 +256,10 @@ export async function POST(request: Request) {
       customer.itemFrequency[item.productId] = prev;
     }
 
-    // Smart auto-tags based on behavior
     const tagsSet = new Set(customer.tags.filter((t) => t !== 'Novo Cliente'));
     if (customer.totalOrders === 1) tagsSet.add('1º Pedido');
     if (customer.totalOrders >= 3) tagsSet.add('Cliente Fiel');
-    if (customer.totalOrders >= 5) tagsSet.add('VIP — Merece Brinde 🎁');
+    if (customer.totalOrders >= 5) tagsSet.add('VIP — Merece Brinde');
     if (customer.averageTicket >= 45) tagsSet.add('Ticket Alto');
     const topItem = Object.values(customer.itemFrequency).sort((a, b) => b.count - a.count)[0];
     if (topItem && topItem.count >= 2) {
@@ -258,14 +293,16 @@ export async function POST(request: Request) {
       netProfit,
       status: 'Novo Pedido',
       origin: 'Cardápio Virtual',
-      customerNotes,
+      customerNotes: customerNotes ? String(customerNotes).slice(0, 300) : undefined,
       infinitePayLink:
         paymentMethod === 'Link de Pagamento (InfinitePay)'
           ? `https://pay.infinitepay.io/${state.settings.storeName.toLowerCase().replace(/[^a-z0-9]/g, '')}/${totalAmount.toFixed(2).replace('.', '')}`
           : undefined,
     };
 
-    const summaryText = orderItems.map((i) => `${i.quantity}x ${i.productName.split('-')[0].trim()}`).join(', ');
+    const summaryText = orderItems
+      .map((i) => `${i.quantity}x ${i.productName.split('-')[0].trim()}`)
+      .join(', ');
     customer.activities.unshift({
       id: `act-${Date.now()}`,
       timestamp: nowIso,
@@ -278,8 +315,9 @@ export async function POST(request: Request) {
     state.orders.unshift(newOrder);
     await saveAppState(state);
 
-    // Return clean public receipt to the customer
-    return NextResponse.json({
+    // Issue signed customer recognition cookie on this browser for future 1-click orders
+    const customerCookie = await signSession(cleanPhone, CUSTOMER_SESSION_MAX_AGE, 'customer');
+    const res = NextResponse.json({
       ok: true,
       order: {
         orderNumber: newOrder.orderNumber,
@@ -294,6 +332,14 @@ export async function POST(request: Request) {
         estimatedDeliveryMinutes: state.settings.estimatedDeliveryMinutes,
       },
     });
+    res.cookies.set(CUSTOMER_COOKIE_NAME, customerCookie, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: CUSTOMER_SESSION_MAX_AGE,
+    });
+    return res;
   } catch (err) {
     console.error('Public order error:', err);
     return NextResponse.json({ error: 'Erro ao registrar pedido.' }, { status: 500 });

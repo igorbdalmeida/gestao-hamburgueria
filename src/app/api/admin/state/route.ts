@@ -1,8 +1,10 @@
 import { isAdminAuthenticated } from '@/lib/auth';
-import { loadAppState, saveAppState } from '@/lib/db';
+import { hasPersistentDb, loadAppState, mergeAdminState, saveAppState } from '@/lib/db';
 import { INITIAL_STATE } from '@/lib/initial-data';
 import { AppDatabaseState } from '@/lib/types';
 import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const isAuth = await isAdminAuthenticated();
@@ -12,8 +14,11 @@ export async function GET() {
   const state = await loadAppState();
   return NextResponse.json({
     state,
-    hasCloudDb: Boolean(
-      process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.NEON_DATABASE_URL
+    hasCloudDb: hasPersistentDb(),
+    hasAiConfigured: Boolean(
+      process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+        state.settings?.geminiApiKey
     ),
   });
 }
@@ -31,12 +36,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ state: saved });
     }
 
-    const newState = body.state as AppDatabaseState;
-    if (!newState || !Array.isArray(newState.ingredients) || !Array.isArray(newState.products)) {
+    const incomingState = body.state as AppDatabaseState;
+    if (
+      !incomingState ||
+      !Array.isArray(incomingState.ingredients) ||
+      !Array.isArray(incomingState.products)
+    ) {
       return NextResponse.json({ error: 'Estado inválido' }, { status: 400 });
     }
 
-    const saved = await saveAppState(newState);
+    const currentServerState = await loadAppState();
+    // Preserve server-side adminPassword if not explicitly modified
+    if (!incomingState.settings.adminPassword && currentServerState.settings?.adminPassword) {
+      incomingState.settings.adminPassword = currentServerState.settings.adminPassword;
+    }
+    if (!incomingState.settings.geminiApiKey && currentServerState.settings?.geminiApiKey) {
+      incomingState.settings.geminiApiKey = currentServerState.settings.geminiApiKey;
+    }
+
+    const merged = mergeAdminState(currentServerState, incomingState, {
+      orderIds: body.deletedOrderIds,
+      customerIds: body.deletedCustomerIds,
+    });
+
+    const saved = await saveAppState(merged);
     return NextResponse.json({ state: saved });
   } catch (err) {
     console.error('Error saving state:', err);
