@@ -85,7 +85,7 @@ export default function AdminManagementPage() {
   const [loggingIn, setLoggingIn] = useState(false);
 
   const [state, setState] = useState<AppDatabaseState>(INITIAL_STATE);
-  const [activeTab, setActiveTab] = useState<AdminTabId>('overview');
+  const [activeTab, setActiveTab] = useState<AdminTabId>('vendas');
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -456,6 +456,13 @@ export default function AdminManagementPage() {
 
   const navItems: { id: AdminTabId; label: string; badge?: number; highlight?: boolean; icon: React.ReactNode }[] = [
     {
+      id: 'vendas',
+      label: 'Fila de Pedidos & Vendas',
+      badge: newOrdersCount || undefined,
+      highlight: newOrdersCount > 0,
+      icon: <ShoppingBag className="size-3.5" />,
+    },
+    {
       id: 'overview',
       label: 'Visão Geral',
       icon: <LayoutDashboard className="size-3.5" />,
@@ -482,13 +489,6 @@ export default function AdminManagementPage() {
       label: 'Notas e Compras (IA)',
       badge: state.invoices.length,
       icon: <Receipt className="size-3.5" />,
-    },
-    {
-      id: 'vendas',
-      label: 'Vendas e Pedidos',
-      badge: newOrdersCount || undefined,
-      highlight: newOrdersCount > 0,
-      icon: <ShoppingBag className="size-3.5" />,
     },
     {
       id: 'clientes',

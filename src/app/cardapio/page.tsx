@@ -124,6 +124,11 @@ export default function CardapioVirtualPage() {
   const [completedOrder, setCompletedOrder] = useState<CompletedOrderDetails | null>(null);
   const [copiedPix, setCopiedPix] = useState(false);
 
+  // VIP Promo & Phone Popup
+  const [showPromoPopup, setShowPromoPopup] = useState(false);
+  const [popupPhoneInput, setPopupPhoneInput] = useState('');
+  const [popupSuccessMsg, setPopupSuccessMsg] = useState('');
+
   useEffect(() => {
     fetch('/api/public/menu')
       .then((r) => r.json())
@@ -134,9 +139,17 @@ export default function CardapioVirtualPage() {
       .finally(() => setLoading(false));
 
     const savedPhone = localStorage.getItem('burger_customer_phone');
+    const dismissedPopup = sessionStorage.getItem('burger_promo_popup_dismissed');
+
     if (savedPhone) {
       setPhone(savedPhone);
       lookupCustomerByPhone(savedPhone);
+    } else if (!dismissedPopup) {
+      // Exibe o pop-up acolhedor para capturar o WhatsApp ou puxar dados de compras anteriores
+      const timer = setTimeout(() => {
+        setShowPromoPopup(true);
+      }, 1200);
+      return () => clearTimeout(timer);
     }
   }, []);
 
@@ -171,6 +184,57 @@ export default function CardapioVirtualPage() {
       // ignore
     } finally {
       setCheckingPhone(false);
+    }
+  }
+
+  function handleDismissPromoPopup() {
+    setShowPromoPopup(false);
+    sessionStorage.setItem('burger_promo_popup_dismissed', 'true');
+  }
+
+  async function handleConfirmPromoPopup(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanDigits = normalizePhone(popupPhoneInput);
+    if (cleanDigits.length < 10) {
+      alert('Por favor, informe seu DDD + número do WhatsApp (ex: 84 99999-9999)');
+      return;
+    }
+
+    setPhone(popupPhoneInput);
+    localStorage.setItem('burger_customer_phone', cleanDigits);
+    sessionStorage.setItem('burger_promo_popup_dismissed', 'true');
+
+    // Executa busca para puxar dados caso já seja cliente
+    setCheckingPhone(true);
+    try {
+      const res = await fetch(`/api/public/menu?phone=${encodeURIComponent(cleanDigits)}`);
+      const data = await res.json();
+      if (data.found && data.customer) {
+        const c = data.customer as RecognizedCustomer;
+        setRecognized(c);
+        setName(c.name);
+        if (c.lastAddress) {
+          setStreet(c.lastAddress.street || '');
+          setNumber(c.lastAddress.number || '');
+          setNeighborhood(c.lastAddress.neighborhood || '');
+          setComplement(c.lastAddress.complement || '');
+          setReference(c.lastAddress.reference || '');
+        }
+        if (c.preferredPaymentMethod) {
+          setPaymentMethod(c.preferredPaymentMethod);
+        }
+        setPopupSuccessMsg(`Que bom ter você de volta, ${c.name}! Seus dados de entrega já foram carregados.`);
+      } else {
+        setPopupSuccessMsg('Número salvo com sucesso! Você receberá nossas ofertas e cupons exclusivos.');
+      }
+    } catch {
+      setPopupSuccessMsg('Número salvo com sucesso!');
+    } finally {
+      setCheckingPhone(false);
+      setTimeout(() => {
+        setShowPromoPopup(false);
+        setPopupSuccessMsg('');
+      }, 1800);
     }
   }
 
@@ -488,25 +552,43 @@ export default function CardapioVirtualPage() {
               </div>
             </div>
 
-            {/* Quick Phone Recognition Chip */}
-            <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-2.5 sm:w-72">
-              <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
-                <span>
-                  {recognized ? `Olá de volta, ${recognized.name}!` : 'Já pediu antes? Digite seu nº:'}
-                </span>
-                {checkingPhone && <span className="text-zinc-400">Buscando...</span>}
+            {/* Quick Recognition Status */}
+            {recognized ? (
+              <div className="bg-[#18181c] border border-orange-500/30 rounded-[10px] p-2.5 sm:w-72 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5">
+                    <Sparkles className="size-3 text-orange-400" />
+                    Olá, {recognized.name}!
+                  </p>
+                  <p className="text-[10px] text-zinc-400">
+                    Dados de entrega carregados automaticamente
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPromoPopup(true)}
+                  className="text-[10px] text-orange-400 hover:text-orange-300 underline font-medium"
+                >
+                  Alterar
+                </button>
               </div>
-              <div className="relative">
-                <Phone className="size-3 text-zinc-500 absolute left-2.5 top-2" />
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => handlePhoneChange(e.target.value)}
-                  placeholder="Seu WhatsApp (86) 99999-9999"
-                  className="w-full pl-7 pr-2.5 py-1 bg-[#09090b] border border-white/[0.08] focus-visible:border-zinc-400 rounded-[6px] text-xs text-zinc-100 placeholder-zinc-500 outline-none tabular-nums"
-                />
-              </div>
-            </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowPromoPopup(true)}
+                className="bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] hover:border-orange-500/30 rounded-[10px] p-2.5 sm:w-72 text-left transition group"
+              >
+                <div className="flex items-center justify-between text-[11px] text-zinc-400 group-hover:text-zinc-200">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Sparkles className="size-3 text-orange-400" />
+                    Ganhe Promoções & Agilize seu Pedido
+                  </span>
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-0.5">
+                  Clique para informar seu WhatsApp
+                </p>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1336,6 +1418,73 @@ export default function CardapioVirtualPage() {
                   : `Finalizar Pedido • ${formatBRL(totalOrderAmount)}`}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Pop-up de Promoções & Agilidade no Pedido */}
+      {showPromoPopup && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#121215] border border-orange-500/40 rounded-[16px] max-w-sm w-full p-6 space-y-4 shadow-2xl relative">
+            <button
+              type="button"
+              aria-label="Fechar pop-up"
+              onClick={handleDismissPromoPopup}
+              className="absolute top-4 right-4 p-1.5 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.08] transition"
+            >
+              <X className="size-4" />
+            </button>
+
+            <div className="text-center space-y-2 pt-1">
+              <div className="size-12 rounded-full bg-gradient-to-tr from-orange-600 to-[#ff5400] text-white flex items-center justify-center mx-auto shadow-lg shadow-orange-500/30">
+                <Sparkles className="size-6 text-white" />
+              </div>
+              <h3 className="text-lg font-bold text-zinc-100 tracking-tight">
+                Fique por dentro das nossas promoções!
+              </h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Digite seu número de WhatsApp para receber cupons exclusivos e carregar seus dados de entrega automaticamente caso já tenha pedido antes.
+              </p>
+            </div>
+
+            {popupSuccessMsg ? (
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-[10px] p-3 text-center space-y-1">
+                <p className="text-xs font-semibold text-emerald-400 flex items-center justify-center gap-1.5">
+                  <Check className="size-4" /> {popupSuccessMsg}
+                </p>
+              </div>
+            ) : (
+              <form onSubmit={handleConfirmPromoPopup} className="space-y-3">
+                <div className="relative">
+                  <Phone className="size-4 text-zinc-500 absolute left-3.5 top-3" />
+                  <input
+                    type="tel"
+                    autoFocus
+                    value={popupPhoneInput}
+                    onChange={(e) => setPopupPhoneInput(e.target.value)}
+                    placeholder="Seu WhatsApp (ex: 84 99999-9999)"
+                    className="w-full pl-10 pr-3 py-2.5 bg-[#09090b] border border-white/[0.12] focus-visible:border-orange-500 rounded-[8px] text-xs text-zinc-100 placeholder-zinc-500 outline-none tabular-nums font-mono"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDismissPromoPopup}
+                    className="flex-1 py-2.5 rounded-[8px] text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04] border border-white/[0.08] transition"
+                  >
+                    Agora não
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={checkingPhone}
+                    className="flex-1 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-bold rounded-[8px] text-xs shadow-md shadow-orange-500/30 transition disabled:opacity-50"
+                  >
+                    {checkingPhone ? 'Buscando...' : 'Confirmar'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

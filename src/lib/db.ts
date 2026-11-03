@@ -66,16 +66,26 @@ async function getSql() {
 }
 
 function normalizeState(state: AppDatabaseState): AppDatabaseState {
+  if (!state) return structuredClone(INITIAL_STATE);
+
   const merged: AppDatabaseState = {
-    ...structuredClone(INITIAL_STATE),
-    ...state,
-    settings: { ...INITIAL_STATE.settings, ...(state.settings || {}) },
+    ingredients: Array.isArray(state.ingredients) ? state.ingredients : INITIAL_STATE.ingredients,
+    products: Array.isArray(state.products) ? state.products : INITIAL_STATE.products,
+    invoices: Array.isArray(state.invoices) ? state.invoices : [],
+    fixedCosts: Array.isArray(state.fixedCosts) ? state.fixedCosts : INITIAL_STATE.fixedCosts,
+    orders: Array.isArray(state.orders) ? state.orders : [],
+    customers: Array.isArray(state.customers) ? state.customers : [],
+    settings: {
+      ...INITIAL_STATE.settings,
+      ...(state.settings || {}),
+    },
+    updatedAt: state.updatedAt || new Date().toISOString(),
   };
 
   // Remove automaticamente os dados fictícios de demonstração antigos caso estivessem salvos
-  merged.orders = (merged.orders || []).filter((o) => !LEGACY_DEMO_ORDER_IDS.has(o.id));
-  merged.customers = (merged.customers || []).filter((c) => !LEGACY_DEMO_CUSTOMER_IDS.has(c.id));
-  merged.invoices = (merged.invoices || []).filter((inv) => !LEGACY_DEMO_INVOICE_IDS.has(inv.id));
+  merged.orders = merged.orders.filter((o) => !LEGACY_DEMO_ORDER_IDS.has(o.id));
+  merged.customers = merged.customers.filter((c) => !LEGACY_DEMO_CUSTOMER_IDS.has(c.id));
+  merged.invoices = merged.invoices.filter((inv) => !LEGACY_DEMO_INVOICE_IDS.has(inv.id));
 
   return merged;
 }

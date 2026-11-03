@@ -390,10 +390,159 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         </div>
       </div>
 
-      {/* POS Quick Launch Box */}
+      {/* Fila de Pedidos Principal em Tempo Real (Posicionada no Topo da Gestão) */}
+      <div className="bg-[#121215] border border-orange-500/35 rounded-[10px] overflow-hidden shadow-lg shadow-black/50">
+        <div className="px-4 py-3 bg-gradient-to-r from-[#18181c] via-[#141418] to-[#121215] border-b border-white/[0.08] flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="size-2.5 rounded-full bg-[#ff5400] animate-pulse" />
+            <h2 className="text-sm font-bold text-zinc-100 tracking-wide uppercase">
+              Fila de Pedidos em Tempo Real
+            </h2>
+          </div>
+          <span className="px-2.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 text-xs font-bold tabular-nums">
+            {state.orders.length} pedidos
+          </span>
+        </div>
+
+        {state.orders.length === 0 ? (
+          <div className="p-8 text-center space-y-2">
+            <ShoppingBag className="size-7 text-zinc-500 mx-auto" />
+            <p className="text-xs font-medium text-zinc-300">
+              Nenhum pedido na fila neste momento
+            </p>
+            <p className="text-[11px] text-zinc-500 max-w-md mx-auto">
+              Os pedidos feitos pelos clientes no Cardápio Virtual (ou lançados no PDV abaixo) aparecerão aqui imediatamente com aviso sonoro da cozinha.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/[0.06] text-xs">
+            {state.orders.map((ord) => {
+              const itemsText = ord.items
+                .map((i) => `${i.quantity}x ${i.productName}${i.notes ? ` (${i.notes})` : ''}`)
+                .join(', ');
+              const statusMessage =
+                ord.status === 'Em Preparo'
+                  ? `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) já foi confirmado e *está sendo preparado na nossa chapa*!`
+                  : ord.status === 'Saiu para Entrega'
+                  ? `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nBoa notícia: seu *Pedido #${ord.orderNumber}* (${itemsText}) *acabou de sair para entrega* no seu endereço!`
+                  : `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) no valor de *${formatBRL(ord.totalAmount)}* está com status: *${ord.status}*!`;
+              const waLink = `https://api.whatsapp.com/send?phone=55${normalizePhone(
+                ord.customerPhone
+              )}&text=${encodeURIComponent(statusMessage)}`;
+
+              return (
+                <div
+                  key={ord.id}
+                  className={`p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                    ord.status === 'Novo Pedido'
+                      ? 'bg-orange-500/[0.08] border-l-4 border-l-[#ff5400]'
+                      : 'hover:bg-white/[0.01]'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-zinc-100 text-sm">
+                        #{ord.orderNumber}
+                      </span>
+                      <span className="text-zinc-100 font-semibold">{ord.customerName}</span>
+                      {ord.customerPhone && ord.customerPhone !== '00000000000' && (
+                        <span className="text-zinc-400 font-mono">
+                          {formatPhoneBR(ord.customerPhone)}
+                        </span>
+                      )}
+                      <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-300 text-[10px]">
+                        {ord.paymentMethod}
+                        {ord.changeFor ? ` (Troco p/ ${ord.changeFor})` : ''}
+                      </span>
+                      <span className="text-zinc-500 tabular-nums">{ord.date}</span>
+                    </div>
+
+                    <div className="text-zinc-200 font-medium space-y-0.5 pt-0.5">
+                      {ord.items.map((i, idx) => (
+                        <div key={idx}>
+                          • <strong className="text-zinc-100">{i.quantity}x</strong> {i.productName} ({formatBRL(i.unitPrice * i.quantity)})
+                          {i.notes && (
+                            <span className="text-orange-400 italic ml-1.5 font-normal">
+                              [Obs: {i.notes}]
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {ord.deliveryAddress?.street && (
+                      <p className="text-zinc-400 text-[11px] pt-0.5">
+                        📍 {ord.deliveryAddress.street}, {ord.deliveryAddress.number} —{' '}
+                        {ord.deliveryAddress.neighborhood}
+                        {ord.deliveryAddress.complement ? ` (${ord.deliveryAddress.complement})` : ''}
+                      </p>
+                    )}
+
+                    {ord.customerNotes && (
+                      <p className="text-amber-300 text-[11px]">
+                        📝 Obs da entrega: {ord.customerNotes}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="bg-[#18181c] border border-white/[0.06] rounded-[6px] px-3 py-1.5 text-right tabular-nums">
+                      <div className="font-semibold text-zinc-100">{formatBRL(ord.totalAmount)}</div>
+                      <div className="text-[11px] text-emerald-400 font-medium">
+                        Lucro: {formatBRL(ord.netProfit)}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={ord.status}
+                        aria-label="Status do pedido"
+                        onChange={(e) =>
+                          handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)
+                        }
+                        className="bg-[#09090b] border border-white/[0.12] rounded-[6px] px-2.5 py-1.5 text-zinc-100 text-xs font-semibold focus-visible:border-orange-500"
+                      >
+                        <option value="Novo Pedido">Novo Pedido</option>
+                        <option value="Em Preparo">Em Preparo</option>
+                        <option value="Saiu para Entrega">Em Entrega</option>
+                        <option value="Entregue">Entregue</option>
+                        <option value="Cancelado">Cancelado</option>
+                      </select>
+
+                      {ord.customerPhone && ord.customerPhone !== '00000000000' && (
+                        <a
+                          href={waLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Avisar cliente no WhatsApp"
+                          className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 rounded-[6px] inline-flex items-center gap-1 text-xs font-medium transition"
+                          title="Avisar cliente no WhatsApp"
+                        >
+                          <MessageCircle className="size-3.5" /> WhatsApp Cliente
+                        </a>
+                      )}
+
+                      <button
+                        type="button"
+                        aria-label="Remover pedido"
+                        onClick={() => handleDeleteOrder(ord.id)}
+                        className="p-1.5 text-zinc-500 hover:text-rose-400"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* POS Quick Launch Box (Abaixo da Fila de Pedidos) */}
       <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-          <h2 className="text-sm font-semibold text-zinc-100">Lançamento de Venda Rápida (PDV)</h2>
+          <h2 className="text-sm font-semibold text-zinc-100">Lançamento de Venda Rápida (PDV Balcão / WhatsApp)</h2>
           <span className="text-xs text-zinc-400">Selecione os itens e informe a forma de pagamento</span>
         </div>
 
@@ -490,150 +639,6 @@ export default function SalesTab({ state, onUpdateState }: Props) {
             <Plus className="size-3.5" /> Registrar Venda ({formatBRL(posSummary.subtotal)})
           </button>
         </div>
-      </div>
-
-      {/* Orders List */}
-      <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-zinc-200">
-            Fila de Pedidos e Histórico de Vendas
-          </h3>
-          <span className="text-xs text-zinc-400 tabular-nums">{state.orders.length} pedidos</span>
-        </div>
-
-        {state.orders.length === 0 ? (
-          <div className="p-8 text-center space-y-2">
-            <ShoppingBag className="size-7 text-zinc-500 mx-auto" />
-            <p className="text-xs font-medium text-zinc-300">
-              Nenhuma venda registrada ainda
-            </p>
-            <p className="text-[11px] text-zinc-500">
-              Os pedidos feitos pelos clientes no Cardápio Virtual ou lançados no PDV acima aparecerão aqui com aviso sonoro.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-white/[0.06] text-xs">
-            {state.orders.map((ord) => {
-              const itemsText = ord.items
-                .map((i) => `${i.quantity}x ${i.productName}${i.notes ? ` (${i.notes})` : ''}`)
-                .join(', ');
-              const statusMessage =
-                ord.status === 'Em Preparo'
-                  ? `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) já foi confirmado e *está sendo preparado na nossa chapa*!`
-                  : ord.status === 'Saiu para Entrega'
-                  ? `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nBoa notícia: seu *Pedido #${ord.orderNumber}* (${itemsText}) *acabou de sair para entrega* no seu endereço!`
-                  : `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) no valor de *${formatBRL(ord.totalAmount)}* está com status: *${ord.status}*!`;
-              const waLink = `https://api.whatsapp.com/send?phone=55${normalizePhone(
-                ord.customerPhone
-              )}&text=${encodeURIComponent(statusMessage)}`;
-
-              return (
-                <div
-                  key={ord.id}
-                  className={`p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
-                    ord.status === 'Novo Pedido'
-                      ? 'bg-orange-500/[0.06] border-l-2 border-l-[#ff5400]'
-                      : 'hover:bg-white/[0.01]'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-zinc-100">
-                        #{ord.orderNumber}
-                      </span>
-                      <span className="text-zinc-200 font-medium">{ord.customerName}</span>
-                      {ord.customerPhone && ord.customerPhone !== '00000000000' && (
-                        <span className="text-zinc-500 font-mono">
-                          {formatPhoneBR(ord.customerPhone)}
-                        </span>
-                      )}
-                      <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-300 text-[10px]">
-                        {ord.paymentMethod}
-                        {ord.changeFor ? ` (Troco p/ ${ord.changeFor})` : ''}
-                      </span>
-                      <span className="text-zinc-500 tabular-nums">{ord.date}</span>
-                    </div>
-
-                    <div className="text-zinc-200 font-medium space-y-0.5 pt-0.5">
-                      {ord.items.map((i, idx) => (
-                        <div key={idx}>
-                          • {i.quantity}x {i.productName} ({formatBRL(i.unitPrice * i.quantity)})
-                          {i.notes && (
-                            <span className="text-orange-400 italic ml-1.5">
-                              [Obs: {i.notes}]
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {ord.deliveryAddress?.street && (
-                      <p className="text-zinc-400 text-[11px] pt-0.5">
-                        📍 {ord.deliveryAddress.street}, {ord.deliveryAddress.number} —{' '}
-                        {ord.deliveryAddress.neighborhood}
-                        {ord.deliveryAddress.complement ? ` (${ord.deliveryAddress.complement})` : ''}
-                      </p>
-                    )}
-
-                    {ord.customerNotes && (
-                      <p className="text-amber-300 text-[11px]">
-                        📝 Obs da entrega: {ord.customerNotes}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="bg-[#18181c] border border-white/[0.06] rounded-[6px] px-3 py-1.5 text-right tabular-nums">
-                      <div className="font-medium text-zinc-100">{formatBRL(ord.totalAmount)}</div>
-                      <div className="text-[11px] text-emerald-400">
-                        Lucro: {formatBRL(ord.netProfit)}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <select
-                        value={ord.status}
-                        aria-label="Status do pedido"
-                        onChange={(e) =>
-                          handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)
-                        }
-                        className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2.5 py-1.5 text-zinc-200 text-xs font-medium"
-                      >
-                        <option value="Novo Pedido">Novo Pedido</option>
-                        <option value="Em Preparo">Em Preparo</option>
-                        <option value="Saiu para Entrega">Em Entrega</option>
-                        <option value="Entregue">Entregue</option>
-                        <option value="Cancelado">Cancelado</option>
-                      </select>
-
-                      {ord.customerPhone && ord.customerPhone !== '00000000000' && (
-                        <a
-                          href={waLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label="Avisar cliente no WhatsApp"
-                          className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 rounded-[6px] inline-flex items-center gap-1 text-xs font-medium transition"
-                          title="Avisar cliente no WhatsApp"
-                        >
-                          <MessageCircle className="size-3.5" /> WhatsApp Cliente
-                        </a>
-                      )}
-
-                      <button
-                        type="button"
-                        aria-label="Remover pedido"
-                        onClick={() => handleDeleteOrder(ord.id)}
-                        className="p-1.5 text-zinc-500 hover:text-rose-400"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
