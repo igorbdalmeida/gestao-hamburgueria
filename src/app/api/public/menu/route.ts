@@ -6,7 +6,7 @@ import {
   signSession,
   verifySession,
 } from '@/lib/session';
-import { CustomerProfile, OrderItem, OrderPaymentMethod, SaleOrder } from '@/lib/types';
+import { OrderItem, OrderPaymentMethod, SaleOrder } from '@/lib/types';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
@@ -44,6 +44,12 @@ export async function GET(request: Request) {
       .slice(0, 2)
       .map(([id]) => id);
 
+    // Normalize legacy payment method names to clean customer-facing labels
+    let prefMethod: OrderPaymentMethod = customer.preferredPaymentMethod || 'PIX';
+    if (prefMethod.includes('PIX')) prefMethod = 'PIX';
+    else if (prefMethod.includes('InfinitePay') || prefMethod.includes('Link'))
+      prefMethod = 'Cartão de Crédito (Na Entrega)';
+
     return NextResponse.json({
       found: true,
       customer: {
@@ -51,8 +57,7 @@ export async function GET(request: Request) {
         phone: customer.phone,
         // Only prefill full street address if the device holds the signed customer cookie
         lastAddress: isVerifiedDevice ? customer.addresses[0] || null : null,
-        preferredPaymentMethod:
-          customer.preferredPaymentMethod || 'PIX (Mercado Pago / Chave)',
+        preferredPaymentMethod: prefMethod,
         totalOrders: customer.totalOrders,
         favoriteItemIds,
       },
@@ -107,6 +112,7 @@ export async function POST(request: Request) {
       address,
       items,
       paymentMethod,
+      changeFor,
       customerNotes,
     } = body as {
       customerName: string;
@@ -120,6 +126,7 @@ export async function POST(request: Request) {
       };
       items: { productId: string; quantity: number; notes?: string }[];
       paymentMethod: OrderPaymentMethod;
+      changeFor?: string;
       customerNotes?: string;
     };
 
@@ -160,7 +167,7 @@ export async function POST(request: Request) {
 
       orderItems.push({
         productId: product.id,
-        productName: product.name,
+        productName: product.shortName || product.name,
         quantity: qty,
         unitPrice: product.practicedPrice,
         unitCmv: metrics.totalCmv,
@@ -182,12 +189,15 @@ export async function POST(request: Request) {
     const totalAmount = subtotal + deliveryFee;
 
     let feePct = 0;
-    if (paymentMethod === 'PIX (Mercado Pago / Chave)') {
+    if (paymentMethod === 'PIX' || paymentMethod === 'PIX (Mercado Pago / Chave)') {
       feePct = state.settings.pixFeePct;
-    } else if (paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)') {
+    } else if (
+      paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
+      paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)'
+    ) {
       feePct = state.settings.creditCardFeePct;
-    } else if (paymentMethod === 'Link de Pagamento (InfinitePay)') {
-      feePct = state.settings.paymentLinkFeePct;
+    } else if (paymentMethod === 'Cartão de Débito (Na Entrega)') {
+      feePct = state.settings.debitCardFeePct;
     }
 
     const paymentFeeAmount = totalAmount * feePct;
@@ -268,6 +278,11 @@ export async function POST(request: Request) {
     }
     customer.tags = Array.from(tagsSet);
 
+    const cleanChangeFor =
+      paymentMethod === 'Dinheiro' && changeFor?.trim()
+        ? String(changeFor).trim().slice(0, 60)
+        : undefined;
+
     const newOrder: SaleOrder = {
       id: `ord-${Date.now()}`,
       orderNumber: nextOrderNumber,
@@ -287,6 +302,7 @@ export async function POST(request: Request) {
       totalAmount,
       totalCmv,
       paymentMethod,
+      changeFor: cleanChangeFor,
       paymentFeeAmount,
       taxReserveAmount,
       fixedCostAllocationAmount,
@@ -294,10 +310,6 @@ export async function POST(request: Request) {
       status: 'Novo Pedido',
       origin: 'Cardápio Virtual',
       customerNotes: customerNotes ? String(customerNotes).slice(0, 300) : undefined,
-      infinitePayLink:
-        paymentMethod === 'Link de Pagamento (InfinitePay)'
-          ? `https://pay.infinitepay.io/${state.settings.storeName.toLowerCase().replace(/[^a-z0-9]/g, '')}/${totalAmount.toFixed(2).replace('.', '')}`
-          : undefined,
     };
 
     const summaryText = orderItems
@@ -323,9 +335,15 @@ export async function POST(request: Request) {
         orderNumber: newOrder.orderNumber,
         createdAt: newOrder.createdAt,
         customerName: newOrder.customerName,
+        customerPhone: newOrder.customerPhone,
+        deliveryAddress: newOrder.deliveryAddress,
+        items: newOrder.items,
+        subtotal: newOrder.subtotal,
+        deliveryFee: newOrder.deliveryFee,
         totalAmount: newOrder.totalAmount,
         paymentMethod: newOrder.paymentMethod,
-        infinitePayLink: newOrder.infinitePayLink,
+        changeFor: newOrder.changeFor,
+        customerNotes: newOrder.customerNotes,
         pixKey: state.settings.pixKey,
         pixBeneficiary: state.settings.pixBeneficiary,
         whatsappNumber: state.settings.whatsappNumber,

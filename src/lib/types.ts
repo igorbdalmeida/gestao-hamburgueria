@@ -126,10 +126,12 @@ export interface OrderItem {
 }
 
 export type OrderPaymentMethod =
+  | 'PIX'
+  | 'Cartão de Crédito (Na Entrega)'
+  | 'Cartão de Débito (Na Entrega)'
+  | 'Dinheiro'
   | 'PIX (Mercado Pago / Chave)'
-  | 'Cartão na Entrega (Maquininha InfinitePay)'
-  | 'Link de Pagamento (InfinitePay)'
-  | 'Dinheiro';
+  | 'Cartão na Entrega (Maquininha InfinitePay)';
 
 export type OrderStatus =
   | 'Novo Pedido'
@@ -159,6 +161,7 @@ export interface SaleOrder {
   totalAmount: number;
   totalCmv: number;
   paymentMethod: OrderPaymentMethod;
+  changeFor?: string;
   paymentFeeAmount: number;
   taxReserveAmount: number;
   fixedCostAllocationAmount: number;
@@ -166,7 +169,6 @@ export interface SaleOrder {
   status: OrderStatus;
   origin: 'Cardápio Virtual' | 'Lançamento Manual PDV';
   customerNotes?: string;
-  infinitePayLink?: string;
 }
 
 export interface CustomerActivity {

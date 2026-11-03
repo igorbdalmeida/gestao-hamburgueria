@@ -1,13 +1,15 @@
 'use client';
 
 import { formatBRL, formatPhoneBR, normalizePhone } from '@/lib/pricing';
-import { OrderPaymentMethod } from '@/lib/types';
+import { OrderItem, OrderPaymentMethod } from '@/lib/types';
 import {
+  Banknote,
   Check,
   ChevronRight,
   Clock,
   Copy,
   CreditCard,
+  Flame,
   MessageCircle,
   Minus,
   Phone,
@@ -15,6 +17,7 @@ import {
   QrCode,
   Search,
   ShoppingBag,
+  Sparkles,
   Star,
   X,
 } from 'lucide-react';
@@ -57,6 +60,30 @@ interface RecognizedCustomer {
   favoriteItemIds: string[];
 }
 
+interface CompletedOrderDetails {
+  orderNumber: number;
+  customerName: string;
+  customerPhone: string;
+  deliveryAddress: {
+    street: string;
+    number: string;
+    neighborhood: string;
+    complement?: string;
+    reference?: string;
+  };
+  items: OrderItem[];
+  subtotal: number;
+  deliveryFee: number;
+  totalAmount: number;
+  paymentMethod: OrderPaymentMethod;
+  changeFor?: string;
+  customerNotes?: string;
+  pixKey: string;
+  pixBeneficiary: string;
+  whatsappNumber: string;
+  estimatedDeliveryMinutes: string;
+}
+
 export default function CardapioVirtualPage() {
   const [store, setStore] = useState<PublicStoreInfo | null>(null);
   const [menu, setMenu] = useState<PublicMenuItem[]>([]);
@@ -68,10 +95,11 @@ export default function CardapioVirtualPage() {
   const [cart, setCart] = useState<Record<string, { quantity: number; notes: string }>>({});
   const [bagOpen, setBagOpen] = useState(false);
 
-  // Selected product modal (iFood style detail modal)
+  // Selected product modal (iFood style detail modal + drink upsell)
   const [detailItem, setDetailItem] = useState<PublicMenuItem | null>(null);
   const [detailQty, setDetailQty] = useState<number>(1);
   const [detailNotes, setDetailNotes] = useState<string>('');
+  const [selectedUpsellDrinkIds, setSelectedUpsellDrinkIds] = useState<string[]>([]);
 
   // Customer identification
   const [phone, setPhone] = useState('');
@@ -87,22 +115,13 @@ export default function CardapioVirtualPage() {
   const [reference, setReference] = useState('');
 
   // Payment & notes
-  const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>('PIX (Mercado Pago / Chave)');
+  const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>('PIX');
+  const [changeFor, setChangeFor] = useState('');
   const [customerNotes, setCustomerNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Completed order
-  const [completedOrder, setCompletedOrder] = useState<{
-    orderNumber: number;
-    customerName: string;
-    totalAmount: number;
-    paymentMethod: OrderPaymentMethod;
-    infinitePayLink?: string;
-    pixKey: string;
-    pixBeneficiary: string;
-    whatsappNumber: string;
-    estimatedDeliveryMinutes: string;
-  } | null>(null);
+  const [completedOrder, setCompletedOrder] = useState<CompletedOrderDetails | null>(null);
   const [copiedPix, setCopiedPix] = useState(false);
 
   useEffect(() => {
@@ -189,17 +208,33 @@ export default function CardapioVirtualPage() {
     const existing = cart[item.id];
     setDetailQty(existing ? existing.quantity : 1);
     setDetailNotes(existing ? existing.notes : '');
+    setSelectedUpsellDrinkIds([]);
+  }
+
+  function toggleUpsellDrinkInModal(drinkId: string) {
+    setSelectedUpsellDrinkIds((prev) =>
+      prev.includes(drinkId) ? prev.filter((id) => id !== drinkId) : [...prev, drinkId]
+    );
   }
 
   function confirmProductDetail() {
     if (!detailItem) return;
-    setCart((prev) => ({
-      ...prev,
-      [detailItem.id]: {
-        quantity: detailQty,
-        notes: detailNotes.trim(),
-      },
-    }));
+    setCart((prev) => {
+      const next = {
+        ...prev,
+        [detailItem.id]: {
+          quantity: detailQty,
+          notes: detailNotes.trim(),
+        },
+      };
+      for (const drinkId of selectedUpsellDrinkIds) {
+        next[drinkId] = {
+          quantity: (next[drinkId]?.quantity || 0) + 1,
+          notes: next[drinkId]?.notes || '',
+        };
+      }
+      return next;
+    });
     setDetailItem(null);
   }
 
@@ -223,6 +258,40 @@ export default function CardapioVirtualPage() {
   const deliveryFee = store?.deliveryFeeDefault || 0;
   const totalOrderAmount = subtotalAmount + deliveryFee;
 
+  // Smart Upsell Logic
+  const drinksInMenu = useMemo(
+    () => menu.filter((m) => m.category === 'Bebidas'),
+    [menu]
+  );
+  const hasDrinkInCart = useMemo(
+    () => cartItemsList.some((i) => i.category === 'Bebidas'),
+    [cartItemsList]
+  );
+  const upsellSuggestionsInBag = useMemo(() => {
+    const inCartIds = new Set(cartItemsList.map((i) => i.id));
+    if (!hasDrinkInCart && drinksInMenu.length > 0) {
+      return {
+        title: '🥤 Vai uma bebida gelada para acompanhar seu lanche?',
+        subtitle: 'Adicione com 1 toque:',
+        items: drinksInMenu.filter((d) => !inCartIds.has(d.id)).slice(0, 3),
+      };
+    }
+    const extraSuggestions = menu.filter((m) => !inCartIds.has(m.id));
+    if (extraSuggestions.length > 0) {
+      return {
+        title: '🔥 Aproveite a entrega e adicione também:',
+        subtitle: 'Clientes também costumam pedir junto:',
+        items: extraSuggestions.slice(0, 3),
+      };
+    }
+    return null;
+  }, [cartItemsList, hasDrinkInCart, drinksInMenu, menu]);
+
+  const featuredItems = useMemo(
+    () => menu.filter((m) => m.featured),
+    [menu]
+  );
+
   const categories = useMemo(() => {
     const cats = Array.from(new Set(menu.map((m) => m.category)));
     return ['Todos', ...cats];
@@ -238,6 +307,60 @@ export default function CardapioVirtualPage() {
       return matchCat && matchSearch;
     });
   }, [menu, selectedCategory, searchTerm]);
+
+  function buildWhatsAppOrderLink(order: CompletedOrderDetails) {
+    const itemsLines = order.items
+      .map(
+        (it) =>
+          `• *${it.quantity}x ${it.productName}* — ${formatBRL(it.unitPrice * it.quantity)}${
+            it.notes ? `\n   _Obs: ${it.notes}_` : ''
+          }`
+      )
+      .join('\n');
+
+    const addressLine = `${order.deliveryAddress.street}, ${order.deliveryAddress.number} - ${
+      order.deliveryAddress.neighborhood
+    }${order.deliveryAddress.complement ? ` (${order.deliveryAddress.complement})` : ''}${
+      order.deliveryAddress.reference ? `\n📍 *Ref:* ${order.deliveryAddress.reference}` : ''
+    }`;
+
+    const paymentLine =
+      order.paymentMethod === 'Dinheiro'
+        ? `Dinheiro (${
+            order.changeFor ? `Troco para ${order.changeFor}` : 'Não precisa de troco'
+          })`
+        : order.paymentMethod === 'PIX'
+        ? 'PIX (Enviarei o comprovante a seguir)'
+        : order.paymentMethod;
+
+    const lines = [
+      `🍔 *NOVO PEDIDO #${order.orderNumber} — ${(store?.storeName || 'MONSTER BURGER').toUpperCase()}*`,
+      `--------------------------------`,
+      `👤 *Cliente:* ${order.customerName}`,
+      `📱 *WhatsApp:* ${formatPhoneBR(order.customerPhone)}`,
+      `--------------------------------`,
+      `🛒 *ITENS DO PEDIDO:*`,
+      itemsLines,
+      `--------------------------------`,
+      `💵 *Subtotal:* ${formatBRL(order.subtotal)}`,
+      `🛵 *Taxa de Entrega:* ${
+        order.deliveryFee === 0 ? 'Grátis' : formatBRL(order.deliveryFee)
+      }`,
+      `🔥 *TOTAL A PAGAR: ${formatBRL(order.totalAmount)}*`,
+      `--------------------------------`,
+      `💳 *Forma de Pagamento:* ${paymentLine}`,
+      `🏠 *Endereço de Entrega:* ${addressLine}`,
+    ];
+
+    if (order.customerNotes) {
+      lines.push(`📝 *Observações:* ${order.customerNotes}`);
+    }
+
+    const text = lines.join('\n');
+    const rawTarget = normalizePhone(order.whatsappNumber || store?.whatsappNumber || '5586999999999');
+    const targetPhone = rawTarget.startsWith('55') ? rawTarget : `55${rawTarget}`;
+    return `https://wa.me/${targetPhone}?text=${encodeURIComponent(text)}`;
+  }
 
   async function handleSubmitOrder(e: React.FormEvent) {
     e.preventDefault();
@@ -265,14 +388,23 @@ export default function CardapioVirtualPage() {
             notes: i.notes,
           })),
           paymentMethod,
+          changeFor: paymentMethod === 'Dinheiro' ? changeFor : undefined,
           customerNotes,
         }),
       });
       const data = await res.json();
       if (data.ok && data.order) {
-        setCompletedOrder(data.order);
+        const orderObj = data.order as CompletedOrderDetails;
+        setCompletedOrder(orderObj);
         setCart({});
         setBagOpen(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        // Se for Cartão na Entrega ou Dinheiro, já abre o WhatsApp da loja automaticamente com o pedido completo!
+        if (orderObj.paymentMethod !== 'PIX') {
+          const waUrl = buildWhatsAppOrderLink(orderObj);
+          window.open(waUrl, '_blank');
+        }
       } else {
         alert(data.error || 'Verifique as informações preenchidas.');
       }
@@ -283,13 +415,6 @@ export default function CardapioVirtualPage() {
     }
   }
 
-  function buildWhatsAppConfirmationLink() {
-    if (!completedOrder) return '#';
-    const text = `🍔 *PEDIDO #${completedOrder.orderNumber}*\n*Cliente:* ${completedOrder.customerName}\n*Telefone:* ${formatPhoneBR(phone)}\n*Total:* ${formatBRL(completedOrder.totalAmount)}\n*Forma de Pagamento:* ${completedOrder.paymentMethod}\n*Endereço:* ${street}, ${number} - ${neighborhood}${complement ? ` (${complement})` : ''}\n${customerNotes ? `*Observação:* ${customerNotes}` : ''}`;
-    const targetPhone = normalizePhone(completedOrder.whatsappNumber || '5586999999999');
-    return `https://wa.me/${targetPhone}?text=${encodeURIComponent(text)}`;
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen bg-[#09090b] text-zinc-400 flex items-center justify-center text-xs">
@@ -297,6 +422,11 @@ export default function CardapioVirtualPage() {
       </div>
     );
   }
+
+  const modalUpsellTotal = selectedUpsellDrinkIds.reduce((acc, id) => {
+    const d = menu.find((m) => m.id === id);
+    return acc + (d ? d.price : 0);
+  }, 0);
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 pb-28">
@@ -358,10 +488,12 @@ export default function CardapioVirtualPage() {
               </div>
             </div>
 
-            {/* Quick Phone Recognition Chip (1-click without creating password) */}
+            {/* Quick Phone Recognition Chip */}
             <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-2.5 sm:w-72">
               <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
-                <span>{recognized ? `Cliente: ${recognized.name}` : 'Já pediu antes?'}</span>
+                <span>
+                  {recognized ? `Olá de volta, ${recognized.name}!` : 'Já pediu antes? Digite seu nº:'}
+                </span>
                 {checkingPhone && <span className="text-zinc-400">Buscando...</span>}
               </div>
               <div className="relative">
@@ -386,7 +518,7 @@ export default function CardapioVirtualPage() {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar no cardápio..."
+              placeholder="Buscar hambúrguer, bebida..."
               className="w-full pl-10 pr-4 py-2 bg-[#18181c] border border-white/[0.08] focus-visible:border-zinc-300 rounded-[8px] text-xs text-zinc-100 placeholder-zinc-500 outline-none"
             />
           </div>
@@ -415,17 +547,24 @@ export default function CardapioVirtualPage() {
 
       {/* Main Menu Body */}
       <main className="max-w-4xl mx-auto px-4 pt-5 space-y-6">
-        {/* Completed Order Notification Banner */}
+        {/* Completed Order Receipt & WhatsApp Dispatch Banner */}
         {completedOrder && (
-          <div className="bg-[#121215] border-2 border-emerald-500/40 rounded-[12px] p-5 space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="bg-[#121215] border-2 border-orange-500/50 rounded-[14px] p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">
-                  Pedido Confirmado #{completedOrder.orderNumber}
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-500/15 text-orange-400 border border-orange-500/30 uppercase tracking-wider">
+                  Pedido Registrado #{completedOrder.orderNumber}
                 </span>
-                <h2 className="text-base font-semibold text-zinc-100">
-                  Tudo certo, {completedOrder.customerName}!
+                <h2 className="text-lg font-bold text-zinc-100 mt-1.5">
+                  Quase lá, {completedOrder.customerName}! Envie sua comanda no WhatsApp:
                 </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Tempo médio de entrega após confirmação:{' '}
+                  <strong className="text-zinc-200">
+                    {completedOrder.estimatedDeliveryMinutes}
+                  </strong>
+                  .
+                </p>
               </div>
               <button
                 type="button"
@@ -437,19 +576,53 @@ export default function CardapioVirtualPage() {
               </button>
             </div>
 
-            <p className="text-xs text-zinc-400">
-              Seu pedido já foi enviado para a cozinha. Tempo estimado:{' '}
-              <strong className="text-zinc-200">{completedOrder.estimatedDeliveryMinutes}</strong>.
-            </p>
+            {/* Resumo completo dos itens que o cliente pediu */}
+            <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-3.5 space-y-2 text-xs">
+              <p className="font-semibold text-zinc-200 border-b border-white/[0.06] pb-1.5">
+                Resumo do seu Pedido #{completedOrder.orderNumber}:
+              </p>
+              <div className="space-y-1.5 tabular-nums">
+                {completedOrder.items.map((it, idx) => (
+                  <div key={idx} className="flex items-start justify-between gap-2 text-zinc-300">
+                    <div>
+                      <span className="font-semibold text-zinc-100">{it.quantity}x</span>{' '}
+                      {it.productName}
+                      {it.notes && (
+                        <span className="block text-[11px] text-orange-400 italic">
+                          Obs: {it.notes}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-medium text-zinc-200 shrink-0">
+                      {formatBRL(it.unitPrice * it.quantity)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-white/[0.08] pt-2 flex items-center justify-between font-bold text-sm text-zinc-100 tabular-nums">
+                <span>Total ({completedOrder.paymentMethod})</span>
+                <span className="text-orange-400">{formatBRL(completedOrder.totalAmount)}</span>
+              </div>
+            </div>
 
-            {completedOrder.paymentMethod === 'PIX (Mercado Pago / Chave)' && (
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 space-y-2 text-xs">
-                <div className="flex items-center gap-1.5 text-zinc-200 font-medium">
-                  <QrCode className="size-4 text-emerald-400" />
-                  <span>Chave PIX para pagamento: {formatBRL(completedOrder.totalAmount)}</span>
+            {/* Instrução conforme forma de pagamento (Sem citar marca de maquininha ou link externo) */}
+            {(completedOrder.paymentMethod === 'PIX' ||
+              completedOrder.paymentMethod === 'PIX (Mercado Pago / Chave)') && (
+              <div className="bg-[#18181c] border border-emerald-500/30 rounded-[10px] p-4 space-y-2.5 text-xs">
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                  <QrCode className="size-4" />
+                  <span>
+                    Passo 1: Copie a chave PIX abaixo e transfira{' '}
+                    {formatBRL(completedOrder.totalAmount)}
+                  </span>
                 </div>
+                {completedOrder.pixBeneficiary && (
+                  <p className="text-[11px] text-zinc-400">
+                    Favorecido: <strong className="text-zinc-200">{completedOrder.pixBeneficiary}</strong>
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-[#09090b] px-3 py-1.5 rounded-[6px] text-xs font-mono text-zinc-200 truncate select-all">
+                  <code className="flex-1 bg-[#09090b] border border-white/[0.1] px-3 py-2 rounded-[6px] text-xs font-mono text-zinc-100 truncate select-all">
                     {completedOrder.pixKey}
                   </code>
                   <button
@@ -457,48 +630,133 @@ export default function CardapioVirtualPage() {
                     onClick={() => {
                       navigator.clipboard.writeText(completedOrder.pixKey);
                       setCopiedPix(true);
-                      setTimeout(() => setCopiedPix(false), 2000);
+                      setTimeout(() => setCopiedPix(false), 2500);
                     }}
-                    className="btn-saas-secondary text-xs"
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-[6px] text-xs inline-flex items-center gap-1.5 shrink-0 transition"
                   >
-                    {copiedPix ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5" />}
-                    {copiedPix ? 'Copiado' : 'Copiar'}
+                    {copiedPix ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                    {copiedPix ? 'Chave Copiada!' : 'Copiar Chave PIX'}
                   </button>
                 </div>
-              </div>
-            )}
-
-            {completedOrder.paymentMethod === 'Link de Pagamento (InfinitePay)' && (
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs space-y-1">
-                <span className="font-medium text-zinc-200 flex items-center gap-1.5">
-                  <CreditCard className="size-4 text-zinc-400" /> Link de Pagamento InfinitePay
-                </span>
-                <p className="text-zinc-400 text-[11px] break-all font-mono">
-                  {completedOrder.infinitePayLink}
+                <p className="text-[11px] text-zinc-400">
+                  Passo 2: Clique no botão verde abaixo para enviar seu pedido completo e o comprovante no WhatsApp da loja.
                 </p>
               </div>
             )}
 
-            {completedOrder.paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)' && (
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300">
-                💳 <strong>Cartão na Entrega:</strong> Levamos a maquininha InfinitePay até o seu endereço. Valor: <strong>{formatBRL(completedOrder.totalAmount)}</strong>.
+            {(completedOrder.paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
+              completedOrder.paymentMethod === 'Cartão de Débito (Na Entrega)' ||
+              completedOrder.paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)') && (
+              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300 flex items-center gap-2">
+                <CreditCard className="size-4 text-orange-400 shrink-0" />
+                <span>
+                  <strong>{completedOrder.paymentMethod}:</strong> O entregador levará a maquininha até o seu endereço para cobrança de{' '}
+                  <strong>{formatBRL(completedOrder.totalAmount)}</strong>.
+                </span>
+              </div>
+            )}
+
+            {completedOrder.paymentMethod === 'Dinheiro' && (
+              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300 flex items-center gap-2">
+                <Banknote className="size-4 text-emerald-400 shrink-0" />
+                <span>
+                  <strong>Pagamento em Dinheiro na Entrega:</strong> Valor total{' '}
+                  <strong>{formatBRL(completedOrder.totalAmount)}</strong>
+                  {completedOrder.changeFor
+                    ? ` (Troco solicitado para ${completedOrder.changeFor})`
+                    : ' (Sem necessidade de troco)'}
+                  .
+                </span>
               </div>
             )}
 
             <a
-              href={buildWhatsAppConfirmationLink()}
+              href={buildWhatsAppOrderLink(completedOrder)}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center justify-center gap-2 w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[8px] text-xs font-semibold"
+              className="inline-flex items-center justify-center gap-2 w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[10px] text-sm font-bold shadow-lg shadow-emerald-600/25 transition"
             >
-              <MessageCircle className="size-4" />
-              Acompanhar Pedido no WhatsApp
+              <MessageCircle className="size-5" />
+              Enviar Comanda Completa no WhatsApp da Loja
             </a>
           </div>
         )}
 
+        {/* Vitrine de Destaque / Campeões de Venda (Estratégia Visual de Conversão) */}
+        {selectedCategory === 'Todos' && !searchTerm.trim() && featuredItems.length > 0 && (
+          <section className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-1.5">
+                <Flame className="size-4 text-[#ff5400] fill-[#ff5400]" />
+                Os Mais Pedidos da Monster
+              </h2>
+              <span className="text-[11px] text-orange-400 font-medium">
+                Favoritos da galera
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {featuredItems.slice(0, 4).map((item) => {
+                const qtyInCart = cart[item.id]?.quantity || 0;
+                return (
+                  <div
+                    key={`feat-${item.id}`}
+                    onClick={() => openProductDetail(item)}
+                    className="bg-[#121215] border border-white/[0.08] hover:border-orange-500/40 rounded-[12px] overflow-hidden flex flex-col justify-between cursor-pointer group transition shadow-md"
+                  >
+                    <div>
+                      <div className="h-28 bg-[#18181c] relative overflow-hidden flex items-center justify-center text-3xl">
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        ) : (
+                          <span>{item.imageEmoji}</span>
+                        )}
+                        <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/80 text-amber-400 border border-amber-500/30 backdrop-blur-sm">
+                          ★ Top Vendas
+                        </span>
+                      </div>
+                      <div className="p-3 space-y-1">
+                        <h3 className="text-xs font-bold text-zinc-100 line-clamp-1 group-hover:text-orange-400 transition-colors">
+                          {item.name}
+                        </h3>
+                        <p className="text-[11px] text-zinc-400 line-clamp-2 leading-snug">
+                          {item.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      className="px-3 pb-3 pt-1 flex items-center justify-between gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span className="text-xs font-bold text-zinc-100 tabular-nums">
+                        {formatBRL(item.price)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openProductDetail(item)}
+                        className="px-2.5 py-1 rounded-[6px] bg-[#ff5400] hover:bg-[#ea4b00] text-white text-[11px] font-semibold transition"
+                      >
+                        {qtyInCart > 0 ? `${qtyInCart} na sacola` : '+ Pedir'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* iFood-Style Product Cards List */}
         <div className="space-y-3">
+          <h2 className="text-sm font-bold text-zinc-200">
+            {selectedCategory === 'Todos' ? 'Cardápio Completo' : selectedCategory}
+          </h2>
+
           {filteredMenu.map((item) => {
             const qtyInCart = cart[item.id]?.quantity || 0;
             const itemNote = cart[item.id]?.notes || '';
@@ -512,9 +770,9 @@ export default function CardapioVirtualPage() {
                 {/* Left: Product Information */}
                 <div className="space-y-1.5 flex-1 pr-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-sm font-semibold text-zinc-100 group-hover:text-orange-400 transition-colors">
+                    <h3 className="text-sm font-semibold text-zinc-100 group-hover:text-orange-400 transition-colors">
                       {item.name}
-                    </h2>
+                    </h3>
                     {item.featured && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20">
                         Mais Pedido
@@ -579,7 +837,7 @@ export default function CardapioVirtualPage() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => addToCart(item.id, 1)}
+                      onClick={() => openProductDetail(item)}
                       className="px-3 py-1 bg-[#18181c] hover:bg-[#ff5400] hover:text-white border border-white/[0.1] text-zinc-200 text-xs font-medium rounded-[6px] flex items-center gap-1 transition"
                     >
                       <Plus className="size-3" /> Adicionar
@@ -592,17 +850,17 @@ export default function CardapioVirtualPage() {
         </div>
       </main>
 
-      {/* iFood-Style Product Detail Modal */}
+      {/* iFood-Style Product Detail Modal + Built-In Drink Upsell */}
       {detailItem && (
         <div
           className="fixed inset-0 bg-black/75 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={() => setDetailItem(null)}
         >
           <div
-            className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl"
+            className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="relative h-56 bg-[#18181c] flex items-center justify-center">
+            <div className="relative h-52 bg-[#18181c] flex items-center justify-center">
               {detailItem.imageUrl ? (
                 <img
                   src={detailItem.imageUrl}
@@ -634,6 +892,58 @@ export default function CardapioVirtualPage() {
                   {detailItem.description}
                 </p>
               </div>
+
+              {/* Estratégia de Upsell Direto ao Escolher um Lanche */}
+              {detailItem.category === 'Hambúrgueres' && drinksInMenu.length > 0 && (
+                <div className="bg-[#18181c] border border-orange-500/25 rounded-[10px] p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                      <Sparkles className="size-3.5 text-orange-400" />
+                      Vai uma bebida gelada para acompanhar?
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">
+                      Opcional
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {drinksInMenu.map((drink) => {
+                      const checked = selectedUpsellDrinkIds.includes(drink.id);
+                      return (
+                        <label
+                          key={drink.id}
+                          className={`flex items-center justify-between p-2 rounded-[8px] border cursor-pointer transition text-xs ${
+                            checked
+                              ? 'bg-orange-500/10 border-orange-500/50 text-zinc-100'
+                              : 'bg-[#09090b] border-white/[0.06] text-zinc-300 hover:border-white/[0.15]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleUpsellDrinkInModal(drink.id)}
+                              className="accent-[#ff5400]"
+                            />
+                            {drink.imageUrl ? (
+                              <img
+                                src={drink.imageUrl}
+                                alt={drink.name}
+                                className="size-7 rounded object-cover"
+                              />
+                            ) : (
+                              <span>{drink.imageEmoji}</span>
+                            )}
+                            <span className="font-medium">{drink.name}</span>
+                          </div>
+                          <span className="font-semibold text-orange-400 tabular-nums">
+                            + {formatBRL(drink.price)}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs text-zinc-300 font-medium block mb-1.5">
@@ -674,9 +984,9 @@ export default function CardapioVirtualPage() {
                   onClick={confirmProductDetail}
                   className="flex-1 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center justify-between px-4 shadow-lg shadow-orange-500/25 transition"
                 >
-                  <span>Adicionar</span>
+                  <span>Adicionar à Sacola</span>
                   <span className="tabular-nums font-bold">
-                    {formatBRL(detailItem.price * detailQty)}
+                    {formatBRL(detailItem.price * detailQty + modalUpsellTotal)}
                   </span>
                 </button>
               </div>
@@ -707,7 +1017,7 @@ export default function CardapioVirtualPage() {
               className="px-6 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center gap-2 shadow-lg shadow-orange-500/25 transition active:scale-95"
             >
               <ShoppingBag className="size-4" />
-              Ver sacola
+              Ver sacola e pedir
               <ChevronRight className="size-4" />
             </button>
           </div>
@@ -741,7 +1051,11 @@ export default function CardapioVirtualPage() {
                     <div className="flex items-center gap-2.5">
                       <div className="size-10 rounded-[6px] bg-[#18181c] border border-white/[0.08] overflow-hidden flex items-center justify-center shrink-0">
                         {item.imageUrl ? (
-                          <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                          <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                          />
                         ) : (
                           <span className="text-base">{item.imageEmoji}</span>
                         )}
@@ -782,9 +1096,58 @@ export default function CardapioVirtualPage() {
                 ))}
               </div>
 
+              {/* Smart Upsell Box Inside Checkout Bag ("Peça Também") */}
+              {upsellSuggestionsInBag && upsellSuggestionsInBag.items.length > 0 && (
+                <div className="bg-gradient-to-r from-orange-500/10 via-[#18181c] to-[#18181c] border border-orange-500/30 rounded-[10px] p-3 space-y-2">
+                  <div>
+                    <p className="text-xs font-bold text-orange-400">
+                      {upsellSuggestionsInBag.title}
+                    </p>
+                    <p className="text-[11px] text-zinc-400">
+                      {upsellSuggestionsInBag.subtitle}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {upsellSuggestionsInBag.items.map((sug) => (
+                      <div
+                        key={`upsell-${sug.id}`}
+                        className="bg-[#09090b] border border-white/[0.08] rounded-[8px] p-2 flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {sug.imageUrl ? (
+                            <img
+                              src={sug.imageUrl}
+                              alt={sug.name}
+                              className="size-8 rounded object-cover shrink-0"
+                            />
+                          ) : (
+                            <span className="text-base">{sug.imageEmoji}</span>
+                          )}
+                          <div className="truncate">
+                            <p className="text-[11px] font-medium text-zinc-100 truncate">
+                              {sug.name}
+                            </p>
+                            <p className="text-[10px] text-orange-400 font-semibold tabular-nums">
+                              {formatBRL(sug.price)}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addToCart(sug.id, 1)}
+                          className="px-2 py-1 rounded bg-[#ff5400] hover:bg-[#ea4b00] text-white text-[10px] font-bold shrink-0 transition"
+                        >
+                          + Adicionar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Customer Contact */}
               <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3 space-y-2.5">
-                <p className="font-medium text-zinc-200">1. Dados do Pedido</p>
+                <p className="font-medium text-zinc-200">1. Seus Dados</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-zinc-400 block mb-1">WhatsApp / Telefone *</label>
@@ -856,42 +1219,42 @@ export default function CardapioVirtualPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-zinc-400 block mb-1">Complemento</label>
+                    <label className="text-zinc-400 block mb-1">Complemento / Ref.</label>
                     <input
                       type="text"
                       value={complement}
                       onChange={(e) => setComplement(e.target.value)}
-                      placeholder="Casa, Apto..."
+                      placeholder="Casa, Apto, Próximo a..."
                       className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Payment Method */}
+              {/* Payment Method (Somente PIX, Cartão Crédito/Débito na Entrega e Dinheiro) */}
               <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3 space-y-2">
                 <p className="font-medium text-zinc-200">3. Forma de Pagamento</p>
                 {(
                   [
                     {
-                      value: 'PIX (Mercado Pago / Chave)',
+                      value: 'PIX',
                       label: 'PIX',
-                      desc: 'Chave fornecida após o pedido',
+                      desc: 'Chave PIX exibida na tela após confirmar',
                     },
                     {
-                      value: 'Cartão na Entrega (Maquininha InfinitePay)',
-                      label: 'Cartão na Entrega',
-                      desc: 'Débito ou Crédito na maquininha',
+                      value: 'Cartão de Crédito (Na Entrega)',
+                      label: 'Cartão de Crédito (Na Entrega)',
+                      desc: 'Levamos a maquininha até você',
                     },
                     {
-                      value: 'Link de Pagamento (InfinitePay)',
-                      label: 'Link de Pagamento Online',
-                      desc: 'Cartão de crédito via link',
+                      value: 'Cartão de Débito (Na Entrega)',
+                      label: 'Cartão de Débito (Na Entrega)',
+                      desc: 'Levamos a maquininha até você',
                     },
                     {
                       value: 'Dinheiro',
-                      label: 'Dinheiro',
-                      desc: 'Pagamento na entrega',
+                      label: 'Dinheiro (Na Entrega)',
+                      desc: 'Pagamento em espécie ao entregador',
                     },
                   ] as const
                 ).map((opt) => (
@@ -899,7 +1262,7 @@ export default function CardapioVirtualPage() {
                     key={opt.value}
                     className={`flex items-start gap-2.5 p-2 rounded-[6px] border cursor-pointer transition ${
                       paymentMethod === opt.value
-                        ? 'border-zinc-300 bg-white/[0.04]'
+                        ? 'border-orange-500/60 bg-orange-500/10'
                         : 'border-white/[0.06] bg-[#09090b]'
                     }`}
                   >
@@ -908,26 +1271,41 @@ export default function CardapioVirtualPage() {
                       name="paymentMethod"
                       checked={paymentMethod === opt.value}
                       onChange={() => setPaymentMethod(opt.value)}
-                      className="mt-0.5 accent-zinc-200"
+                      className="mt-0.5 accent-[#ff5400]"
                     />
                     <div>
-                      <p className="font-medium text-zinc-200">{opt.label}</p>
-                      <p className="text-[11px] text-zinc-500">{opt.desc}</p>
+                      <p className="font-medium text-zinc-100">{opt.label}</p>
+                      <p className="text-[11px] text-zinc-400">{opt.desc}</p>
                     </div>
                   </label>
                 ))}
+
+                {paymentMethod === 'Dinheiro' && (
+                  <div className="pt-1.5">
+                    <label className="text-zinc-300 font-medium block mb-1">
+                      Precisa de troco para quanto?
+                    </label>
+                    <input
+                      type="text"
+                      value={changeFor}
+                      onChange={(e) => setChangeFor(e.target.value)}
+                      placeholder="Ex: R$ 50,00 (ou deixe em branco se não precisar)"
+                      className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Order Notes */}
               <div>
                 <label className="text-zinc-400 block mb-1">
-                  Observações gerais do pedido (ex: troco para R$ 50, tocar interfone)
+                  Observações da entrega (ex: tocar interfone, portão preto)
                 </label>
                 <input
                   type="text"
                   value={customerNotes}
                   onChange={(e) => setCustomerNotes(e.target.value)}
-                  placeholder="Alguma observação na entrega?"
+                  placeholder="Alguma observação para o entregador?"
                   className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
                 />
               </div>
@@ -935,7 +1313,7 @@ export default function CardapioVirtualPage() {
               {/* Total Calculation */}
               <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3 space-y-1.5 tabular-nums">
                 <div className="flex justify-between text-zinc-400">
-                  <span>Subtotal</span>
+                  <span>Subtotal dos itens</span>
                   <span>{formatBRL(subtotalAmount)}</span>
                 </div>
                 <div className="flex justify-between text-zinc-400">
@@ -943,19 +1321,19 @@ export default function CardapioVirtualPage() {
                   <span>{deliveryFee === 0 ? 'Grátis' : formatBRL(deliveryFee)}</span>
                 </div>
                 <div className="border-t border-white/[0.08] pt-2 flex justify-between text-sm font-semibold text-zinc-100">
-                  <span>Total</span>
-                  <span>{formatBRL(totalOrderAmount)}</span>
+                  <span>Total a Pagar</span>
+                  <span className="text-orange-400">{formatBRL(totalOrderAmount)}</span>
                 </div>
               </div>
 
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs shadow-lg shadow-orange-500/25 transition active:scale-[0.99] disabled:opacity-50"
+                className="w-full py-3.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-bold rounded-[8px] text-xs shadow-lg shadow-orange-500/25 transition active:scale-[0.99] disabled:opacity-50"
               >
                 {submitting
-                  ? 'Confirmando pedido...'
-                  : `Confirmar Pedido • ${formatBRL(totalOrderAmount)}`}
+                  ? 'Registrando pedido...'
+                  : `Finalizar Pedido • ${formatBRL(totalOrderAmount)}`}
               </button>
             </form>
           </div>

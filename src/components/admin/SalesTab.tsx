@@ -15,10 +15,11 @@ import {
   SaleOrder,
 } from '@/lib/types';
 import {
-  CreditCard,
   ExternalLink,
   MessageCircle,
+  PhoneCall,
   Plus,
+  QrCode,
   ShoppingBag,
   Trash2,
 } from 'lucide-react';
@@ -32,8 +33,7 @@ interface Props {
 export default function SalesTab({ state, onUpdateState }: Props) {
   const [customerName, setCustomerName] = useState('Cliente Balcão / WhatsApp');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [paymentMethod, setPaymentMethod] =
-    useState<OrderPaymentMethod>('PIX (Mercado Pago / Chave)');
+  const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>('PIX');
   const [posCart, setPosCart] = useState<Record<string, number>>({});
 
   function addPosQty(productId: string, delta: number) {
@@ -59,7 +59,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
       const m = calculateProductMetrics(prod, state.ingredients);
       items.push({
         productId: prod.id,
-        productName: prod.name,
+        productName: prod.shortName || prod.name,
         quantity: qty,
         unitPrice: prod.practicedPrice,
         unitCmv: m.totalCmv,
@@ -69,11 +69,16 @@ export default function SalesTab({ state, onUpdateState }: Props) {
     }
 
     let feePct = 0;
-    if (paymentMethod === 'PIX (Mercado Pago / Chave)') feePct = state.settings.pixFeePct;
-    else if (paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)')
+    if (paymentMethod === 'PIX' || paymentMethod === 'PIX (Mercado Pago / Chave)') {
+      feePct = state.settings.pixFeePct;
+    } else if (
+      paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
+      paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)'
+    ) {
       feePct = state.settings.creditCardFeePct;
-    else if (paymentMethod === 'Link de Pagamento (InfinitePay)')
-      feePct = state.settings.paymentLinkFeePct;
+    } else if (paymentMethod === 'Cartão de Débito (Na Entrega)') {
+      feePct = state.settings.debitCardFeePct;
+    }
 
     const paymentFeeAmount = subtotal * feePct;
     const taxReserveAmount = subtotal * state.settings.estimatedTaxPct;
@@ -230,7 +235,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Vendas e Pedidos</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Registro de caixa, provisões de impostos e pedidos do Cardápio Online.
+            Fila de produção com alerta sonoro, destino do WhatsApp da loja e registro de caixa.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -252,6 +257,63 @@ export default function SalesTab({ state, onUpdateState }: Props) {
             <ExternalLink className="size-3.5 text-zinc-400" />
             Acessar Cardápio Online
           </a>
+        </div>
+      </div>
+
+      {/* Quick Store Reception Settings (WhatsApp & PIX Key) */}
+      <div className="bg-[#121215] border border-orange-500/25 rounded-[10px] p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end text-xs">
+        <div>
+          <label className="text-zinc-300 font-medium flex items-center gap-1.5 mb-1">
+            <PhoneCall className="size-3.5 text-emerald-400" />
+            WhatsApp da Loja (Recebe os Pedidos do Cardápio)
+          </label>
+          <input
+            type="tel"
+            value={state.settings.whatsappNumber}
+            onChange={(e) =>
+              onUpdateState((prev) => ({
+                ...prev,
+                settings: { ...prev.settings, whatsappNumber: e.target.value },
+              }))
+            }
+            placeholder="Ex: 5586999999999"
+            className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100 font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-zinc-300 font-medium flex items-center gap-1.5 mb-1">
+            <QrCode className="size-3.5 text-orange-400" />
+            Sua Chave PIX Oficial (Exibida ao Cliente no Cardápio)
+          </label>
+          <input
+            type="text"
+            value={state.settings.pixKey}
+            onChange={(e) =>
+              onUpdateState((prev) => ({
+                ...prev,
+                settings: { ...prev.settings, pixKey: e.target.value },
+              }))
+            }
+            placeholder="CPF, CNPJ, Celular, E-mail ou Chave Aleatória"
+            className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100 font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-zinc-300 font-medium block mb-1">
+            Nome do Recebedor PIX
+          </label>
+          <input
+            type="text"
+            value={state.settings.pixBeneficiary}
+            onChange={(e) =>
+              onUpdateState((prev) => ({
+                ...prev,
+                settings: { ...prev.settings, pixBeneficiary: e.target.value },
+              }))
+            }
+            placeholder="Seu Nome ou Razão Social"
+            className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100"
+          />
         </div>
       </div>
 
@@ -282,11 +344,11 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         </div>
 
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4">
-          <p className="text-xs text-zinc-400">Taxas de Recebimento</p>
+          <p className="text-xs text-zinc-400">Taxas de Maquininha</p>
           <p className="text-xl font-semibold text-zinc-200 mt-1">
             {formatBRL(totals.totalFees)}
           </p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">InfinitePay / Link</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Crédito / Débito</p>
         </div>
 
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4 col-span-2 sm:col-span-1">
@@ -301,8 +363,8 @@ export default function SalesTab({ state, onUpdateState }: Props) {
       {/* POS Quick Launch Box */}
       <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-          <h2 className="text-sm font-semibold text-zinc-100">Lançamento de Venda Rápida</h2>
-          <span className="text-xs text-zinc-400">Selecione os itens e informe o canal</span>
+          <h2 className="text-sm font-semibold text-zinc-100">Lançamento de Venda Rápida (PDV)</h2>
+          <span className="text-xs text-zinc-400">Selecione os itens e informe a forma de pagamento</span>
         </div>
 
         {/* Product Selection Grid */}
@@ -384,13 +446,9 @@ export default function SalesTab({ state, onUpdateState }: Props) {
               onChange={(e) => setPaymentMethod(e.target.value as OrderPaymentMethod)}
               className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
             >
-              <option value="PIX (Mercado Pago / Chave)">PIX (Mercado Pago / Chave)</option>
-              <option value="Cartão na Entrega (Maquininha InfinitePay)">
-                Cartão na Entrega (Maquininha InfinitePay)
-              </option>
-              <option value="Link de Pagamento (InfinitePay)">
-                Link de Pagamento (InfinitePay)
-              </option>
+              <option value="PIX">PIX</option>
+              <option value="Cartão de Crédito (Na Entrega)">Cartão de Crédito</option>
+              <option value="Cartão de Débito (Na Entrega)">Cartão de Débito</option>
               <option value="Dinheiro">Dinheiro</option>
             </select>
           </div>
@@ -420,20 +478,27 @@ export default function SalesTab({ state, onUpdateState }: Props) {
               Nenhuma venda registrada ainda
             </p>
             <p className="text-[11px] text-zinc-500">
-              Os pedidos feitos pelos clientes no Cardápio Virtual ou lançados no PDV acima aparecerão aqui.
+              Os pedidos feitos pelos clientes no Cardápio Virtual ou lançados no PDV acima aparecerão aqui com aviso sonoro.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-white/[0.06] text-xs">
             {state.orders.map((ord) => {
+              const itemsText = ord.items
+                .map((i) => `${i.quantity}x ${i.productName}${i.notes ? ` (${i.notes})` : ''}`)
+                .join(', ');
               const waLink = `https://wa.me/55${normalizePhone(ord.customerPhone)}?text=${encodeURIComponent(
-                `Olá ${ord.customerName}! Aqui é da ${state.settings.storeName}. Pedido #${ord.orderNumber} (${formatBRL(ord.totalAmount)}) está com status: *${ord.status}*.`
+                `🍔 Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) no valor de *${formatBRL(ord.totalAmount)}* está com status: *${ord.status}*!`
               )}`;
 
               return (
                 <div
                   key={ord.id}
-                  className="p-4 hover:bg-white/[0.01] flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  className={`p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                    ord.status === 'Novo Pedido'
+                      ? 'bg-orange-500/[0.06] border-l-2 border-l-[#ff5400]'
+                      : 'hover:bg-white/[0.01]'
+                  }`}
                 >
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -446,26 +511,38 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                           {formatPhoneBR(ord.customerPhone)}
                         </span>
                       )}
-                      <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-400 text-[10px]">
-                        {ord.origin}
+                      <span className="px-2 py-0.5 rounded-[4px] bg-[#18181c] border border-white/[0.08] text-zinc-300 text-[10px]">
+                        {ord.paymentMethod}
+                        {ord.changeFor ? ` (Troco p/ ${ord.changeFor})` : ''}
                       </span>
                       <span className="text-zinc-500 tabular-nums">{ord.date}</span>
                     </div>
 
-                    <p className="text-zinc-300">
-                      {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(' • ')}
-                    </p>
+                    <div className="text-zinc-200 font-medium space-y-0.5 pt-0.5">
+                      {ord.items.map((i, idx) => (
+                        <div key={idx}>
+                          • {i.quantity}x {i.productName} ({formatBRL(i.unitPrice * i.quantity)})
+                          {i.notes && (
+                            <span className="text-orange-400 italic ml-1.5">
+                              [Obs: {i.notes}]
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
 
                     {ord.deliveryAddress?.street && (
-                      <p className="text-zinc-500 text-[11px]">
-                        {ord.deliveryAddress.street}, {ord.deliveryAddress.number} —{' '}
+                      <p className="text-zinc-400 text-[11px] pt-0.5">
+                        📍 {ord.deliveryAddress.street}, {ord.deliveryAddress.number} —{' '}
                         {ord.deliveryAddress.neighborhood}
                         {ord.deliveryAddress.complement ? ` (${ord.deliveryAddress.complement})` : ''}
                       </p>
                     )}
 
                     {ord.customerNotes && (
-                      <p className="text-zinc-400 text-[11px]">Obs: {ord.customerNotes}</p>
+                      <p className="text-amber-300 text-[11px]">
+                        📝 Obs da entrega: {ord.customerNotes}
+                      </p>
                     )}
                   </div>
 
@@ -498,27 +575,12 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                           href={waLink}
                           target="_blank"
                           rel="noreferrer"
-                          aria-label="Enviar mensagem no WhatsApp"
-                          className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300 rounded-[6px]"
-                          title="WhatsApp"
+                          aria-label="Avisar cliente no WhatsApp"
+                          className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 rounded-[6px] inline-flex items-center gap-1 text-xs font-medium transition"
+                          title="Avisar cliente no WhatsApp"
                         >
-                          <MessageCircle className="size-4" />
+                          <MessageCircle className="size-3.5" /> WhatsApp Cliente
                         </a>
-                      )}
-
-                      {ord.infinitePayLink && (
-                        <button
-                          type="button"
-                          aria-label="Copiar link InfinitePay"
-                          onClick={() => {
-                            navigator.clipboard.writeText(ord.infinitePayLink!);
-                            alert('Link copiado!');
-                          }}
-                          className="p-1.5 bg-[#18181c] hover:bg-zinc-800 border border-white/[0.08] text-zinc-300 rounded-[6px]"
-                          title="Copiar Link InfinitePay"
-                        >
-                          <CreditCard className="size-4" />
-                        </button>
                       )}
 
                       <button

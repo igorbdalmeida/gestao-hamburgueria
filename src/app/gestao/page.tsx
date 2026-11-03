@@ -9,9 +9,12 @@ import PricingTab from '@/components/admin/PricingTab';
 import RecipesTab from '@/components/admin/RecipesTab';
 import SalesTab from '@/components/admin/SalesTab';
 import { INITIAL_STATE } from '@/lib/initial-data';
-import { AppDatabaseState } from '@/lib/types';
+import { formatBRL } from '@/lib/pricing';
+import { AppDatabaseState, SaleOrder } from '@/lib/types';
 import {
   BarChart3,
+  Bell,
+  BellOff,
   Calculator,
   Check,
   ChefHat,
@@ -41,6 +44,39 @@ type AdminTabId =
   | 'clientes'
   | 'financeiro';
 
+// Campainha sonora estilo cozinha / iFood usando Web Audio API (não depende de arquivo MP3 externo)
+function playKitchenBell() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    const playTone = (freq: number, startTime: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.35, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    };
+
+    const now = ctx.currentTime;
+    playTone(880, now, 0.25);        // A5
+    playTone(1174.66, now + 0.22, 0.45); // D6
+    playTone(880, now + 0.75, 0.25);
+    playTone(1174.66, now + 0.97, 0.5);
+  } catch {
+    // ignore audio block
+  }
+}
+
 export default function AdminManagementPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [pinInput, setPinInput] = useState('');
@@ -54,6 +90,7 @@ export default function AdminManagementPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [hasCloudDb, setHasCloudDb] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   const latestStateRef = useRef<AppDatabaseState>(INITIAL_STATE);
   const savingRef = useRef(false);
@@ -61,6 +98,12 @@ export default function AdminManagementPage() {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deletedOrderIdsRef = useRef<Set<string>>(new Set());
   const deletedCustomerIdsRef = useRef<Set<string>>(new Set());
+  const knownOrderIdsRef = useRef<Set<string>>(new Set());
+  const soundEnabledRef = useRef(true);
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
 
   useEffect(() => {
     fetch('/api/auth')
@@ -126,16 +169,33 @@ export default function AdminManagementPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [persistToServer]);
 
-  // Poll silencioso a cada 20s APENAS para novos pedidos de clientes, e somente quando o usuário NÃO está digitando
+  // Poll silencioso a cada 10s para detectar novos pedidos em tempo real e tocar campainha
   useEffect(() => {
     if (!authenticated) return;
     const interval = setInterval(() => {
       if (!savingRef.current && !dirtyRef.current) {
         loadServerState(true);
       }
-    }, 20000);
+    }, 10000);
     return () => clearInterval(interval);
   }, [authenticated]);
+
+  function notifyNewIncomingOrder(newOrder: SaleOrder) {
+    if (soundEnabledRef.current) {
+      playKitchenBell();
+    }
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const summary = newOrder.items.map((i) => `${i.quantity}x ${i.productName}`).join(', ');
+        new Notification(`🍔 Novo Pedido #${newOrder.orderNumber} — ${newOrder.customerName}`, {
+          body: `${summary} • Total: ${formatBRL(newOrder.totalAmount)} (${newOrder.paymentMethod})`,
+          icon: '/logo.jpg',
+        });
+      }
+    } catch {
+      // ignore notification error
+    }
+  }
 
   async function loadServerState(silent = false) {
     try {
@@ -143,28 +203,41 @@ export default function AdminManagementPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.state) {
+          const incomingOrders: SaleOrder[] = (data.state.orders || []).filter(
+            (o: SaleOrder) => !deletedOrderIdsRef.current.has(o.id)
+          );
+
           if (!silent) {
+            knownOrderIdsRef.current = new Set(incomingOrders.map((o) => o.id));
             latestStateRef.current = data.state;
             setState(data.state);
             setHasUnsavedChanges(false);
             dirtyRef.current = false;
           } else if (!dirtyRef.current && !savingRef.current) {
+            // Verifica se chegou algum pedido inédito
+            const brandNewOrders = incomingOrders.filter(
+              (o) => !knownOrderIdsRef.current.has(o.id)
+            );
+            for (const bo of brandNewOrders) {
+              knownOrderIdsRef.current.add(bo.id);
+            }
+            if (brandNewOrders.length > 0) {
+              notifyNewIncomingOrder(brandNewOrders[0]);
+            }
+
             setState((prev) => {
-              const serverOrders = (data.state.orders || []).filter(
-                (o: { id: string }) => !deletedOrderIdsRef.current.has(o.id)
-              );
               const serverCustomers = (data.state.customers || []).filter(
                 (c: { id: string }) => !deletedCustomerIdsRef.current.has(c.id)
               );
               if (
-                serverOrders.length === prev.orders.length &&
+                incomingOrders.length === prev.orders.length &&
                 serverCustomers.length === prev.customers.length
               ) {
                 return prev;
               }
               const merged = {
                 ...prev,
-                orders: serverOrders,
+                orders: incomingOrders,
                 customers: serverCustomers,
               };
               latestStateRef.current = merged;
@@ -191,6 +264,9 @@ export default function AdminManagementPage() {
         if (!nextOrderIds.has(oldOrd.id)) {
           deletedOrderIdsRef.current.add(oldOrd.id);
         }
+      }
+      for (const ord of next.orders) {
+        knownOrderIdsRef.current.add(ord.id);
       }
 
       const nextCustomerIds = new Set(next.customers.map((c) => c.id));
@@ -227,6 +303,26 @@ export default function AdminManagementPage() {
 
       return next;
     });
+  }
+
+  function handleToggleSound() {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    if (next) {
+      playKitchenBell();
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+  }
+
+  function handleAcceptOrderQuick(orderId: string) {
+    handleUpdateState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((o) =>
+        o.id === orderId ? { ...o, status: 'Em Preparo' } : o
+      ),
+    }));
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -355,7 +451,8 @@ export default function AdminManagementPage() {
     );
   }
 
-  const newOrdersCount = state.orders.filter((o) => o.status === 'Novo Pedido').length;
+  const pendingNewOrders = state.orders.filter((o) => o.status === 'Novo Pedido');
+  const newOrdersCount = pendingNewOrders.length;
 
   const navItems: { id: AdminTabId; label: string; badge?: number; highlight?: boolean; icon: React.ReactNode }[] = [
     {
@@ -445,6 +542,22 @@ export default function AdminManagementPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={handleToggleSound}
+              className={`px-2.5 py-1.5 rounded-[6px] text-xs font-medium flex items-center gap-1.5 border transition ${
+                soundEnabled
+                  ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                  : 'bg-[#18181c] border-white/[0.08] text-zinc-500'
+              }`}
+              title="Alerta sonoro quando chegar novo pedido (clique para testar o som)"
+            >
+              {soundEnabled ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
+              <span className="hidden md:inline">
+                {soundEnabled ? 'Som de Pedidos Ativo' : 'Som Mudo'}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => persistToServer(latestStateRef.current)}
               disabled={saving}
               className={`px-3 py-1.5 rounded-[6px] text-xs font-semibold flex items-center gap-1.5 transition ${
@@ -508,7 +621,7 @@ export default function AdminManagementPage() {
                   <span
                     className={`px-1.5 rounded-full text-[10px] font-semibold tabular-nums ${
                       tab.highlight
-                        ? 'bg-[#ff5400] text-white'
+                        ? 'bg-[#ff5400] text-white animate-pulse'
                         : active
                         ? 'bg-zinc-300 text-zinc-900'
                         : 'bg-white/[0.08] text-zinc-300'
@@ -522,6 +635,46 @@ export default function AdminManagementPage() {
           })}
         </div>
       </header>
+
+      {/* Banner Ao Vivo de Novo Pedido (Aparece em qualquer aba até o operador aceitar!) */}
+      {pendingNewOrders.length > 0 && (
+        <div className="bg-gradient-to-r from-[#ff5400] via-orange-600 to-[#ff5400] text-white border-b border-orange-400/40 shadow-lg">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start sm:items-center gap-3">
+              <span className="size-8 rounded-full bg-black/25 flex items-center justify-center shrink-0 animate-bounce">
+                <Bell className="size-4 text-white" />
+              </span>
+              <div>
+                <p className="font-bold text-sm">
+                  🔔 {pendingNewOrders.length === 1 ? 'NOVO PEDIDO RECEBIDO!' : `${pendingNewOrders.length} NOVOS PEDIDOS AGUARDANDO!`}
+                </p>
+                <p className="text-white/95">
+                  Último: <strong>#{pendingNewOrders[0].orderNumber} — {pendingNewOrders[0].customerName}</strong> •{' '}
+                  {pendingNewOrders[0].items.map((i) => `${i.quantity}x ${i.productName}`).join(', ')} •{' '}
+                  <strong>{formatBRL(pendingNewOrders[0].totalAmount)}</strong> ({pendingNewOrders[0].paymentMethod})
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleAcceptOrderQuick(pendingNewOrders[0].id)}
+                className="px-3.5 py-2 rounded-[6px] bg-black/80 hover:bg-black text-white font-bold transition"
+              >
+                ✓ Aceitar e Iniciar Preparo
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('vendas')}
+                className="px-3.5 py-2 rounded-[6px] bg-white text-zinc-950 font-bold hover:bg-zinc-100 transition"
+              >
+                Abrir Fila de Pedidos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 pt-6">

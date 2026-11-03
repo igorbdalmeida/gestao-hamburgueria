@@ -21,7 +21,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
   );
 
   const [simPaymentMode, setSimPaymentMode] = useState<
-    'padrao' | 'pix' | 'debito_infinite' | 'credito_infinite' | 'link_infinite'
+    'padrao' | 'pix' | 'debito_infinite' | 'credito_infinite'
   >('padrao');
 
   const rows = useMemo(() => {
@@ -66,7 +66,6 @@ export default function PricingTab({ state, onUpdateState }: Props) {
     if (simPaymentMode === 'pix') channelFee = state.settings.pixFeePct;
     else if (simPaymentMode === 'debito_infinite') channelFee = state.settings.debitCardFeePct;
     else if (simPaymentMode === 'credito_infinite') channelFee = state.settings.creditCardFeePct;
-    else if (simPaymentMode === 'link_infinite') channelFee = state.settings.paymentLinkFeePct;
 
     return calculateProductMetrics(
       { ...selectedProduct, channelFeePct: channelFee },
@@ -287,9 +286,8 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                 [
                   { id: 'padrao', label: `Taxa Padrão (${formatPct(selectedProduct.channelFeePct, 1)})` },
                   { id: 'pix', label: `PIX (${formatPct(state.settings.pixFeePct, 1)})` },
-                  { id: 'debito_infinite', label: `InfinitePay Débito (${formatPct(state.settings.debitCardFeePct, 2)})` },
-                  { id: 'credito_infinite', label: `InfinitePay Crédito (${formatPct(state.settings.creditCardFeePct, 2)})` },
-                  { id: 'link_infinite', label: `Link InfinitePay (${formatPct(state.settings.paymentLinkFeePct, 2)})` },
+                  { id: 'debito_infinite', label: `Cartão Débito (${formatPct(state.settings.debitCardFeePct, 2)})` },
+                  { id: 'credito_infinite', label: `Cartão Crédito (${formatPct(state.settings.creditCardFeePct, 2)})` },
                 ] as const
               ).map((mode) => (
                 <button

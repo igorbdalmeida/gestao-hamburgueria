@@ -418,7 +418,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
 
               <div>
                 <label className="text-zinc-400 block mb-1">
-                  Taxa Maquininha InfinitePay Crédito (%)
+                  Taxa Maquininha Crédito (%)
                 </label>
                 <input
                   type="number"
@@ -438,18 +438,18 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
               </div>
               <div>
                 <label className="text-zinc-400 block mb-1">
-                  Taxa Link de Pagamento InfinitePay (%)
+                  Taxa Maquininha Débito (%)
                 </label>
                 <input
                   type="number"
                   step="0.01"
-                  value={Number((state.settings.paymentLinkFeePct * 100).toFixed(2))}
+                  value={Number((state.settings.debitCardFeePct * 100).toFixed(2))}
                   onChange={(e) =>
                     onUpdateState((prev) => ({
                       ...prev,
                       settings: {
                         ...prev.settings,
-                        paymentLinkFeePct: (parseFloat(e.target.value) || 0) / 100,
+                        debitCardFeePct: (parseFloat(e.target.value) || 0) / 100,
                       },
                     }))
                   }
