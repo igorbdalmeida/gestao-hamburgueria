@@ -454,7 +454,7 @@ export default function CardapioVirtualPage() {
                   </h1>
                 </div>
                 <p className="text-xs text-zinc-400 line-clamp-1">
-                  {store?.storeSubtitle || 'Smash Burger Artesanal • Delivery Rápido'}
+                  {store?.storeSubtitle || 'Burger Artesanal na Brasa • Delivery Suculento'}
                 </p>
                 <div className="flex flex-wrap items-center gap-3 text-xs pt-1">
                   <span className="flex items-center gap-1 font-semibold text-amber-400">

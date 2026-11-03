@@ -398,6 +398,21 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
                 />
               </div>
               <div>
+                <label className="text-zinc-400 block mb-1">Tempo Estimado de Entrega (Cardápio)</label>
+                <input
+                  type="text"
+                  value={state.settings.estimatedDeliveryMinutes}
+                  onChange={(e) =>
+                    onUpdateState((prev) => ({
+                      ...prev,
+                      settings: { ...prev.settings, estimatedDeliveryMinutes: e.target.value },
+                    }))
+                  }
+                  placeholder="Ex: 40 - 55 min ou 60 - 80 min"
+                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
+                />
+              </div>
+              <div>
                 <label className="text-zinc-400 block mb-1">Taxa de Entrega Padrão (R$)</label>
                 <input
                   type="number"

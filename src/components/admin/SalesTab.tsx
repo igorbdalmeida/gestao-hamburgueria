@@ -272,12 +272,12 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         </div>
       </div>
 
-      {/* Quick Store Reception Settings (WhatsApp & PIX Key) */}
-      <div className="bg-[#121215] border border-orange-500/25 rounded-[10px] p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end text-xs">
+      {/* Quick Store Reception Settings (WhatsApp, PIX Key & Tempo de Entrega) */}
+      <div className="bg-[#121215] border border-orange-500/25 rounded-[10px] p-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs">
         <div>
           <label className="text-zinc-300 font-medium flex items-center gap-1.5 mb-1">
             <PhoneCall className="size-3.5 text-emerald-400" />
-            WhatsApp da Loja (Recebe os Pedidos do Cardápio)
+            WhatsApp da Loja
           </label>
           <input
             type="tel"
@@ -295,7 +295,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         <div>
           <label className="text-zinc-300 font-medium flex items-center gap-1.5 mb-1">
             <QrCode className="size-3.5 text-orange-400" />
-            Sua Chave PIX Oficial (Exibida ao Cliente no Cardápio)
+            Chave PIX Oficial
           </label>
           <input
             type="text"
@@ -312,7 +312,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         </div>
         <div>
           <label className="text-zinc-300 font-medium block mb-1">
-            Nome do Recebedor PIX
+            Nome Favorecido PIX
           </label>
           <input
             type="text"
@@ -325,6 +325,24 @@ export default function SalesTab({ state, onUpdateState }: Props) {
             }
             placeholder="Seu Nome ou Razão Social"
             className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100"
+          />
+        </div>
+        <div>
+          <label className="text-zinc-300 font-medium block mb-1">
+            Tempo Estimado no Cardápio
+          </label>
+          <input
+            type="text"
+            value={state.settings.estimatedDeliveryMinutes || ''}
+            onChange={(e) =>
+              onUpdateState((prev) => ({
+                ...prev,
+                settings: { ...prev.settings, estimatedDeliveryMinutes: e.target.value },
+              }))
+            }
+            placeholder="Ex: 40-50 min ou 60-80 min"
+            className="w-full bg-[#09090b] border border-orange-500/40 focus-visible:border-orange-500 rounded-[6px] px-3 py-1.5 text-zinc-100 font-medium"
+            title="Altere aqui quando o movimento estiver alto para avisar os clientes no cardápio"
           />
         </div>
       </div>
