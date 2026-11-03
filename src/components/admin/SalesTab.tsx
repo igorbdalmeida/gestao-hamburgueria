@@ -499,9 +499,15 @@ export default function SalesTab({ state, onUpdateState }: Props) {
               const itemsText = ord.items
                 .map((i) => `${i.quantity}x ${i.productName}${i.notes ? ` (${i.notes})` : ''}`)
                 .join(', ');
-              const waLink = `https://wa.me/55${normalizePhone(ord.customerPhone)}?text=${encodeURIComponent(
-                `🍔 Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) no valor de *${formatBRL(ord.totalAmount)}* está com status: *${ord.status}*!`
-              )}`;
+              const statusMessage =
+                ord.status === 'Em Preparo'
+                  ? `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) já foi confirmado e *está sendo preparado na nossa chapa*!`
+                  : ord.status === 'Saiu para Entrega'
+                  ? `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nBoa notícia: seu *Pedido #${ord.orderNumber}* (${itemsText}) *acabou de sair para entrega* no seu endereço!`
+                  : `Olá *${ord.customerName}*! Aqui é da *${state.settings.storeName}*.\n\nSeu *Pedido #${ord.orderNumber}* (${itemsText}) no valor de *${formatBRL(ord.totalAmount)}* está com status: *${ord.status}*!`;
+              const waLink = `https://api.whatsapp.com/send?phone=55${normalizePhone(
+                ord.customerPhone
+              )}&text=${encodeURIComponent(statusMessage)}`;
 
               return (
                 <div

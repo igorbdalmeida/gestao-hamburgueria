@@ -321,7 +321,7 @@ export default function CardapioVirtualPage() {
     const addressLine = `${order.deliveryAddress.street}, ${order.deliveryAddress.number} - ${
       order.deliveryAddress.neighborhood
     }${order.deliveryAddress.complement ? ` (${order.deliveryAddress.complement})` : ''}${
-      order.deliveryAddress.reference ? `\n📍 *Ref:* ${order.deliveryAddress.reference}` : ''
+      order.deliveryAddress.reference ? `\n▸ *Ponto de Ref:* ${order.deliveryAddress.reference}` : ''
     }`;
 
     const paymentLine =
@@ -334,32 +334,32 @@ export default function CardapioVirtualPage() {
         : order.paymentMethod;
 
     const lines = [
-      `🍔 *NOVO PEDIDO #${order.orderNumber} — ${(store?.storeName || 'MONSTER BURGER').toUpperCase()}*`,
+      `*NOVO PEDIDO #${order.orderNumber} — ${(store?.storeName || 'MONSTER BURGER').toUpperCase()}*`,
       `--------------------------------`,
-      `👤 *Cliente:* ${order.customerName}`,
-      `📱 *WhatsApp:* ${formatPhoneBR(order.customerPhone)}`,
+      `▸ *Cliente:* ${order.customerName}`,
+      `▸ *WhatsApp:* ${formatPhoneBR(order.customerPhone)}`,
       `--------------------------------`,
-      `🛒 *ITENS DO PEDIDO:*`,
+      `*ITENS DO PEDIDO:*`,
       itemsLines,
       `--------------------------------`,
-      `💵 *Subtotal:* ${formatBRL(order.subtotal)}`,
-      `🛵 *Taxa de Entrega:* ${
+      `▸ *Subtotal:* ${formatBRL(order.subtotal)}`,
+      `▸ *Taxa de Entrega:* ${
         order.deliveryFee === 0 ? 'Grátis' : formatBRL(order.deliveryFee)
       }`,
-      `🔥 *TOTAL A PAGAR: ${formatBRL(order.totalAmount)}*`,
+      `▸ *TOTAL A PAGAR: ${formatBRL(order.totalAmount)}*`,
       `--------------------------------`,
-      `💳 *Forma de Pagamento:* ${paymentLine}`,
-      `🏠 *Endereço de Entrega:* ${addressLine}`,
+      `▸ *Forma de Pagamento:* ${paymentLine}`,
+      `▸ *Endereço de Entrega:* ${addressLine}`,
     ];
 
     if (order.customerNotes) {
-      lines.push(`📝 *Observações:* ${order.customerNotes}`);
+      lines.push(`▸ *Observações:* ${order.customerNotes}`);
     }
 
     const text = lines.join('\n');
     const rawTarget = normalizePhone(order.whatsappNumber || store?.whatsappNumber || '5586999999999');
     const targetPhone = rawTarget.startsWith('55') ? rawTarget : `55${rawTarget}`;
-    return `https://wa.me/${targetPhone}?text=${encodeURIComponent(text)}`;
+    return `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(text)}`;
   }
 
   async function handleSubmitOrder(e: React.FormEvent) {

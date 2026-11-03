@@ -307,9 +307,9 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
                       }. Vimos que você costuma pedir o nosso *${
                         fav ? fav.productName.split('-')[0].trim() : 'hambúrguer'
                       }*. Estamos com pedidos abertos hoje!`;
-                      const waUrl = `https://wa.me/55${normalizePhone(
+                      const waUrl = `https://api.whatsapp.com/send?phone=55${normalizePhone(
                         selectedCustomer.phone
-                      )}?text=${encodeURIComponent(promoMsg)}`;
+                      )}&text=${encodeURIComponent(promoMsg)}`;
                       return (
                         <a
                           href={waUrl}
