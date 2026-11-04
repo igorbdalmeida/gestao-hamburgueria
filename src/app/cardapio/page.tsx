@@ -463,12 +463,6 @@ export default function CardapioVirtualPage() {
         setCart({});
         setBagOpen(false);
         window.scrollTo({ top: 0, behavior: 'smooth' });
-
-        // Se for Cartão na Entrega ou Dinheiro, já abre o WhatsApp da loja automaticamente com o pedido completo!
-        if (orderObj.paymentMethod !== 'PIX') {
-          const waUrl = buildWhatsAppOrderLink(orderObj);
-          window.open(waUrl, '_blank');
-        }
       } else {
         alert(data.error || 'Verifique as informações preenchidas.');
       }
@@ -625,7 +619,7 @@ export default function CardapioVirtualPage() {
               <MessageCircle className="size-4" />
               {completedOrder.paymentMethod === 'PIX'
                 ? 'Enviar Pedido e Comprovante no WhatsApp da Loja'
-                : 'Acompanhar Pedido no WhatsApp da Loja'}
+                : 'Confirmar e Enviar Pedido no WhatsApp da Loja'}
             </a>
           </div>
         </div>
