@@ -494,6 +494,143 @@ export default function CardapioVirtualPage() {
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 pb-28">
+      {/* Completed Order Receipt & WhatsApp Dispatch Banner (Exibido no Topo Absoluto da Tela quando houver pedido) */}
+      {completedOrder && (
+        <div id="comprovante-topo" className="bg-[#09090b] border-b-2 border-orange-500/60 sticky top-0 z-40 shadow-2xl backdrop-blur-md">
+          <div className="max-w-4xl mx-auto p-4 sm:p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-500/15 text-orange-400 border border-orange-500/30 uppercase tracking-wider">
+                  Pedido Registrado #{completedOrder.orderNumber}
+                </span>
+                <h2 className="text-lg font-bold text-zinc-100 mt-1.5">
+                  Quase lá, {completedOrder.customerName}! Envie sua comanda no WhatsApp:
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Tempo médio de entrega após confirmação:{' '}
+                  <strong className="text-zinc-200">
+                    {completedOrder.estimatedDeliveryMinutes}
+                  </strong>
+                  .
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Fechar comprovante"
+                onClick={() => setCompletedOrder(null)}
+                className="text-zinc-400 hover:text-zinc-200 p-1 rounded-full bg-white/[0.04] hover:bg-white/[0.08] transition"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* Resumo completo dos itens que o cliente pediu */}
+            <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-3.5 space-y-2 text-xs">
+              <p className="font-semibold text-zinc-200 border-b border-white/[0.06] pb-1.5">
+                Resumo do seu Pedido #{completedOrder.orderNumber}:
+              </p>
+              <div className="space-y-1.5 tabular-nums">
+                {completedOrder.items.map((it, idx) => (
+                  <div key={idx} className="flex items-start justify-between gap-2 text-zinc-300">
+                    <div>
+                      <span className="font-semibold text-zinc-100">{it.quantity}x</span>{' '}
+                      {it.productName}
+                      {it.notes && (
+                        <span className="block text-[11px] text-orange-400 italic">
+                          Obs: {it.notes}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-medium text-zinc-200 shrink-0">
+                      {formatBRL(it.unitPrice * it.quantity)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-white/[0.08] pt-2 flex items-center justify-between font-bold text-sm text-zinc-100 tabular-nums">
+                <span>Total ({completedOrder.paymentMethod})</span>
+                <span className="text-orange-400">{formatBRL(completedOrder.totalAmount)}</span>
+              </div>
+            </div>
+
+            {/* Instrução conforme forma de pagamento (Sem citar marca de maquininha ou link externo) */}
+            {(completedOrder.paymentMethod === 'PIX' ||
+              completedOrder.paymentMethod === 'PIX (Mercado Pago / Chave)') && (
+              <div className="bg-[#18181c] border border-emerald-500/30 rounded-[10px] p-4 space-y-2.5 text-xs">
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                  <QrCode className="size-4" />
+                  <span>
+                    Passo 1: Copie a chave PIX abaixo e transfira{' '}
+                    {formatBRL(completedOrder.totalAmount)}
+                  </span>
+                </div>
+                {completedOrder.pixBeneficiary && (
+                  <p className="text-[11px] text-zinc-400">
+                    Favorecido: <strong className="text-zinc-200">{completedOrder.pixBeneficiary}</strong>
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-[#09090b] border border-white/[0.1] px-3 py-2 rounded-[6px] text-xs font-mono text-zinc-100 truncate select-all">
+                    {completedOrder.pixKey}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(completedOrder.pixKey);
+                      setCopiedPix(true);
+                      setTimeout(() => setCopiedPix(false), 2500);
+                    }}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-[6px] text-xs inline-flex items-center gap-1.5 shrink-0 transition"
+                  >
+                    {copiedPix ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                    {copiedPix ? 'Chave Copiada!' : 'Copiar Chave PIX'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Passo 2: Clique no botão verde abaixo para enviar seu pedido completo e o comprovante no WhatsApp da loja.
+                </p>
+              </div>
+            )}
+
+            {(completedOrder.paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
+              completedOrder.paymentMethod === 'Cartão de Débito (Na Entrega)' ||
+              completedOrder.paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)') && (
+              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300 flex items-center gap-2">
+                <CreditCard className="size-4 text-orange-400 shrink-0" />
+                <span>
+                  Tudo pronto! Levaremos a maquininha de cartão até o seu endereço para o pagamento na entrega.
+                </span>
+              </div>
+            )}
+
+            {completedOrder.paymentMethod === 'Dinheiro' && (
+              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300 flex items-center gap-2">
+                <Banknote className="size-4 text-emerald-400 shrink-0" />
+                <span>
+                  Pagamento em Dinheiro na entrega.{' '}
+                  {completedOrder.changeFor
+                    ? `Troco preparado para ${completedOrder.changeFor}.`
+                    : 'Não precisa de troco.'}
+                </span>
+              </div>
+            )}
+
+            {/* Botão de Envio / Acompanhamento WhatsApp com Cupom 100% Detalhado */}
+            <a
+              href={buildWhatsAppOrderLink(completedOrder)}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full py-3.5 rounded-[8px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-600/30 active:scale-[0.99]"
+            >
+              <MessageCircle className="size-4" />
+              {completedOrder.paymentMethod === 'PIX'
+                ? 'Enviar Pedido e Comprovante no WhatsApp da Loja'
+                : 'Acompanhar Pedido no WhatsApp da Loja'}
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* iFood-Style Store Header with Monster Burger Visual Identity */}
       <header className="border-b border-white/[0.08] bg-[#121215]">
         {/* Banner strip */}
@@ -629,141 +766,6 @@ export default function CardapioVirtualPage() {
 
       {/* Main Menu Body */}
       <main className="max-w-4xl mx-auto px-4 pt-5 space-y-6">
-        {/* Completed Order Receipt & WhatsApp Dispatch Banner */}
-        {completedOrder && (
-          <div className="bg-[#121215] border-2 border-orange-500/50 rounded-[14px] p-5 space-y-4 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-500/15 text-orange-400 border border-orange-500/30 uppercase tracking-wider">
-                  Pedido Registrado #{completedOrder.orderNumber}
-                </span>
-                <h2 className="text-lg font-bold text-zinc-100 mt-1.5">
-                  Quase lá, {completedOrder.customerName}! Envie sua comanda no WhatsApp:
-                </h2>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Tempo médio de entrega após confirmação:{' '}
-                  <strong className="text-zinc-200">
-                    {completedOrder.estimatedDeliveryMinutes}
-                  </strong>
-                  .
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label="Fechar comprovante"
-                onClick={() => setCompletedOrder(null)}
-                className="text-zinc-400 hover:text-zinc-200 p-1"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            {/* Resumo completo dos itens que o cliente pediu */}
-            <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-3.5 space-y-2 text-xs">
-              <p className="font-semibold text-zinc-200 border-b border-white/[0.06] pb-1.5">
-                Resumo do seu Pedido #{completedOrder.orderNumber}:
-              </p>
-              <div className="space-y-1.5 tabular-nums">
-                {completedOrder.items.map((it, idx) => (
-                  <div key={idx} className="flex items-start justify-between gap-2 text-zinc-300">
-                    <div>
-                      <span className="font-semibold text-zinc-100">{it.quantity}x</span>{' '}
-                      {it.productName}
-                      {it.notes && (
-                        <span className="block text-[11px] text-orange-400 italic">
-                          Obs: {it.notes}
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-medium text-zinc-200 shrink-0">
-                      {formatBRL(it.unitPrice * it.quantity)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-white/[0.08] pt-2 flex items-center justify-between font-bold text-sm text-zinc-100 tabular-nums">
-                <span>Total ({completedOrder.paymentMethod})</span>
-                <span className="text-orange-400">{formatBRL(completedOrder.totalAmount)}</span>
-              </div>
-            </div>
-
-            {/* Instrução conforme forma de pagamento (Sem citar marca de maquininha ou link externo) */}
-            {(completedOrder.paymentMethod === 'PIX' ||
-              completedOrder.paymentMethod === 'PIX (Mercado Pago / Chave)') && (
-              <div className="bg-[#18181c] border border-emerald-500/30 rounded-[10px] p-4 space-y-2.5 text-xs">
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                  <QrCode className="size-4" />
-                  <span>
-                    Passo 1: Copie a chave PIX abaixo e transfira{' '}
-                    {formatBRL(completedOrder.totalAmount)}
-                  </span>
-                </div>
-                {completedOrder.pixBeneficiary && (
-                  <p className="text-[11px] text-zinc-400">
-                    Favorecido: <strong className="text-zinc-200">{completedOrder.pixBeneficiary}</strong>
-                  </p>
-                )}
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-[#09090b] border border-white/[0.1] px-3 py-2 rounded-[6px] text-xs font-mono text-zinc-100 truncate select-all">
-                    {completedOrder.pixKey}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(completedOrder.pixKey);
-                      setCopiedPix(true);
-                      setTimeout(() => setCopiedPix(false), 2500);
-                    }}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-[6px] text-xs inline-flex items-center gap-1.5 shrink-0 transition"
-                  >
-                    {copiedPix ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    {copiedPix ? 'Chave Copiada!' : 'Copiar Chave PIX'}
-                  </button>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Passo 2: Clique no botão verde abaixo para enviar seu pedido completo e o comprovante no WhatsApp da loja.
-                </p>
-              </div>
-            )}
-
-            {(completedOrder.paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
-              completedOrder.paymentMethod === 'Cartão de Débito (Na Entrega)' ||
-              completedOrder.paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)') && (
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300 flex items-center gap-2">
-                <CreditCard className="size-4 text-orange-400 shrink-0" />
-                <span>
-                  <strong>{completedOrder.paymentMethod}:</strong> O entregador levará a maquininha até o seu endereço para cobrança de{' '}
-                  <strong>{formatBRL(completedOrder.totalAmount)}</strong>.
-                </span>
-              </div>
-            )}
-
-            {completedOrder.paymentMethod === 'Dinheiro' && (
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 text-xs text-zinc-300 flex items-center gap-2">
-                <Banknote className="size-4 text-emerald-400 shrink-0" />
-                <span>
-                  <strong>Pagamento em Dinheiro na Entrega:</strong> Valor total{' '}
-                  <strong>{formatBRL(completedOrder.totalAmount)}</strong>
-                  {completedOrder.changeFor
-                    ? ` (Troco solicitado para ${completedOrder.changeFor})`
-                    : ' (Sem necessidade de troco)'}
-                  .
-                </span>
-              </div>
-            )}
-
-            <a
-              href={buildWhatsAppOrderLink(completedOrder)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-2 w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[10px] text-sm font-bold shadow-lg shadow-emerald-600/25 transition"
-            >
-              <MessageCircle className="size-5" />
-              Enviar Comanda Completa no WhatsApp da Loja
-            </a>
-          </div>
-        )}
-
         {/* Vitrine de Destaque / Campeões de Venda (Estratégia Visual de Conversão) */}
         {selectedCategory === 'Todos' && !searchTerm.trim() && featuredItems.length > 0 && (
           <section className="space-y-2.5">
