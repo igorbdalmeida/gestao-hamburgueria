@@ -229,6 +229,18 @@ export default function SalesTab({ state, onUpdateState }: Props) {
     };
   }, [state.orders]);
 
+  // Fila ativa em tempo real: apenas pedidos que ainda não foram entregues nem cancelados
+  const activeQueueOrders = useMemo(() => {
+    return state.orders.filter(
+      (o) => o.status === 'Novo Pedido' || o.status === 'Em Preparo' || o.status === 'Saiu para Entrega'
+    );
+  }, [state.orders]);
+
+  // Histórico de pedidos finalizados (Entregues ou Cancelados)
+  const completedHistoryOrders = useMemo(() => {
+    return state.orders.filter((o) => o.status === 'Entregue' || o.status === 'Cancelado');
+  }, [state.orders]);
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -396,27 +408,27 @@ export default function SalesTab({ state, onUpdateState }: Props) {
           <div className="flex items-center gap-2.5">
             <span className="size-2.5 rounded-full bg-[#ff5400] animate-pulse" />
             <h2 className="text-sm font-bold text-zinc-100 tracking-wide uppercase">
-              Fila de Pedidos em Tempo Real
+              Fila de Pedidos em Produção / Entrega
             </h2>
           </div>
           <span className="px-2.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 text-xs font-bold tabular-nums">
-            {state.orders.length} pedidos
+            {activeQueueOrders.length} na fila
           </span>
         </div>
 
-        {state.orders.length === 0 ? (
+        {activeQueueOrders.length === 0 ? (
           <div className="p-8 text-center space-y-2">
             <ShoppingBag className="size-7 text-zinc-500 mx-auto" />
             <p className="text-xs font-medium text-zinc-300">
-              Nenhum pedido na fila neste momento
+              Nenhum pedido em aberto na fila neste momento
             </p>
             <p className="text-[11px] text-zinc-500 max-w-md mx-auto">
-              Os pedidos feitos pelos clientes no Cardápio Virtual (ou lançados no PDV abaixo) aparecerão aqui imediatamente com aviso sonoro da cozinha.
+              Todos os pedidos foram entregues! Novos pedidos que chegarem do cardápio entrarão aqui automaticamente.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-white/[0.06] text-xs">
-            {state.orders.map((ord) => {
+            {activeQueueOrders.map((ord) => {
               const itemsText = ord.items
                 .map((i) => `${i.quantity}x ${i.productName}${i.notes ? ` (${i.notes})` : ''}`)
                 .join(', ');
@@ -436,6 +448,8 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                   className={`p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
                     ord.status === 'Novo Pedido'
                       ? 'bg-orange-500/[0.08] border-l-4 border-l-[#ff5400]'
+                      : ord.status === 'Saiu para Entrega'
+                      ? 'bg-blue-500/[0.04] border-l-4 border-l-blue-500'
                       : 'hover:bg-white/[0.01]'
                   }`}
                 >
@@ -505,7 +519,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                         <option value="Novo Pedido">Novo Pedido</option>
                         <option value="Em Preparo">Em Preparo</option>
                         <option value="Saiu para Entrega">Em Entrega</option>
-                        <option value="Entregue">Entregue</option>
+                        <option value="Entregue">✓ Marcar como Entregue</option>
                         <option value="Cancelado">Cancelado</option>
                       </select>
 
@@ -640,6 +654,76 @@ export default function SalesTab({ state, onUpdateState }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Histórico de Pedidos Concluídos / Entregues */}
+      {completedHistoryOrders.length > 0 && (
+        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
+          <div className="px-4 py-3 bg-[#18181c]/60 border-b border-white/[0.08] flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-zinc-300">
+              Histórico de Vendas Concluídas ({completedHistoryOrders.length})
+            </h3>
+            <span className="text-[11px] text-zinc-500">Pedidos já entregues ou finalizados</span>
+          </div>
+
+          <div className="divide-y divide-white/[0.06] text-xs">
+            {completedHistoryOrders.map((ord) => {
+              return (
+                <div
+                  key={ord.id}
+                  className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-zinc-300 hover:bg-white/[0.01]"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-zinc-200">#{ord.orderNumber}</span>
+                      <span className="text-zinc-100 font-medium">{ord.customerName}</span>
+                      <span className="px-2 py-0.2 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {ord.status}
+                      </span>
+                      <span className="text-zinc-500 tabular-nums">{ord.date}</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-400">
+                      {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(', ')}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right tabular-nums">
+                      <span className="font-semibold text-zinc-200">{formatBRL(ord.totalAmount)}</span>
+                      <span className="block text-[10px] text-emerald-400">
+                        Lucro: {formatBRL(ord.netProfit)}
+                      </span>
+                    </div>
+
+                    <select
+                      value={ord.status}
+                      aria-label="Reabrir status do pedido"
+                      onChange={(e) =>
+                        handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)
+                      }
+                      className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-zinc-300 text-[11px]"
+                      title="Mudar status caso queira reabrir"
+                    >
+                      <option value="Entregue">Entregue</option>
+                      <option value="Em Preparo">Reabrir: Em Preparo</option>
+                      <option value="Saiu para Entrega">Reabrir: Em Entrega</option>
+                      <option value="Cancelado">Cancelado</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      aria-label="Remover do histórico"
+                      onClick={() => handleDeleteOrder(ord.id)}
+                      className="p-1 text-zinc-500 hover:text-rose-400"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
