@@ -370,6 +370,21 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
                 />
               </div>
               <div>
+                <label className="text-zinc-400 block mb-1">Subtítulo do Cardápio</label>
+                <input
+                  type="text"
+                  value={state.settings.storeSubtitle}
+                  onChange={(e) =>
+                    onUpdateState((prev) => ({
+                      ...prev,
+                      settings: { ...prev.settings, storeSubtitle: e.target.value },
+                    }))
+                  }
+                  placeholder="Ex: Burger Artesanal na Brasa • Delivery Rápido"
+                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
+                />
+              </div>
+              <div>
                 <label className="text-zinc-400 block mb-1">WhatsApp para Receber Pedidos</label>
                 <input
                   type="text"

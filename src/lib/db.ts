@@ -87,6 +87,11 @@ function normalizeState(state: AppDatabaseState): AppDatabaseState {
   merged.customers = merged.customers.filter((c) => !LEGACY_DEMO_CUSTOMER_IDS.has(c.id));
   merged.invoices = merged.invoices.filter((inv) => !LEGACY_DEMO_INVOICE_IDS.has(inv.id));
 
+  // Substitui qualquer texto residual de 'Smash' no subtítulo da loja pelo correto na brasa
+  if (merged.settings.storeSubtitle && merged.settings.storeSubtitle.toLowerCase().includes('smash')) {
+    merged.settings.storeSubtitle = 'Burger Artesanal na Brasa • Delivery Rápido & Suculento';
+  }
+
   return merged;
 }
 
