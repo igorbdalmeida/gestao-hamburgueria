@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://monsterburger.vercel.app'),
   title: 'Monster Burger | Cardápio Online & Delivery',
   description:
     'Monster Burger - Burger Artesanal na Brasa. Faça seu pedido online pelo cardápio digital oficial e receba quentinho no conforto da sua casa.',

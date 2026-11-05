@@ -4,6 +4,7 @@ import { formatBRL } from '@/lib/pricing';
 import { AppDatabaseState, Ingredient, IngredientCategory, UsageUnit } from '@/lib/types';
 import { History, Plus, Search, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { todayLocal } from '@/lib/periods';
 
 interface Props {
   state: AppDatabaseState;
@@ -64,7 +65,7 @@ export default function IngredientsTab({ state, onUpdateState }: Props) {
       unitCost,
       priceHistory: [
         {
-          date: new Date().toISOString().slice(0, 10),
+          date: todayLocal(),
           supplier: 'Cadastro manual',
           packagePrice: price,
           packageContent: content,

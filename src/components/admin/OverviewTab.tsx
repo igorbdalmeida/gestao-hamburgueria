@@ -11,7 +11,14 @@ import {
   ShoppingBag,
   TrendingUp,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import PeriodSelector from './PeriodSelector';
+import {
+  isDateInRange,
+  orderLocalDate,
+  PeriodKey,
+  resolvePeriod,
+} from '@/lib/periods';
+import { useMemo, useState } from 'react';
 
 interface Props {
   state: AppDatabaseState;
@@ -25,19 +32,56 @@ interface Props {
       | 'vendas'
       | 'clientes'
       | 'financeiro'
+      | 'configuracoes'
   ) => void;
 }
 
 export default function OverviewTab({ state, onNavigate }: Props) {
+  const [period, setPeriod] = useState<PeriodKey>('hoje');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const range = useMemo(
+    () => resolvePeriod(period, { from: customFrom, to: customTo }),
+    [period, customFrom, customTo]
+  );
+
   const analytics = useMemo(() => {
-    const validOrders = state.orders.filter((o) => o.status !== 'Cancelado');
+    const periodOrders = state.orders.filter((o) => isDateInRange(orderLocalDate(o), range));
+    const cancelledCount = periodOrders.filter((o) => o.status === 'Cancelado').length;
+    const validOrders = periodOrders.filter((o) => o.status !== 'Cancelado');
+    const periodInvoices = state.invoices.filter((inv) => isDateInRange(inv.date, range));
+
+    // Itens mais vendidos e formas de pagamento no período
+    const itemMap: Record<string, { name: string; qty: number; revenue: number }> = {};
+    const payMap: Record<string, { count: number; total: number }> = {};
+    for (const o of validOrders) {
+      for (const it of o.items) {
+        const cur = itemMap[it.productId] || { name: it.productName, qty: 0, revenue: 0 };
+        cur.qty += it.quantity;
+        cur.revenue += it.unitPrice * it.quantity;
+        itemMap[it.productId] = cur;
+      }
+      const label = o.paymentMethod.replace(' (Na Entrega)', '').replace(' (Mercado Pago / Chave)', '');
+      const pm = payMap[label] || { count: 0, total: 0 };
+      pm.count += 1;
+      pm.total += o.totalAmount;
+      payMap[label] = pm;
+    }
+    const topItems = Object.values(itemMap).sort((a, b) => b.qty - a.qty).slice(0, 5);
+    const paymentSeries = Object.entries(payMap)
+      .map(([label, v]) => ({ label, ...v }))
+      .sort((a, b) => b.total - a.total);
+    const recentOrders = [...periodOrders].sort((a, b) =>
+      (b.createdAt || '').localeCompare(a.createdAt || '')
+    );
+
     const grossRevenue = validOrders.reduce((acc, o) => acc + o.totalAmount, 0);
     const totalSalesCmv = validOrders.reduce((acc, o) => acc + o.totalCmv, 0);
     const totalFees = validOrders.reduce((acc, o) => acc + o.paymentFeeAmount, 0);
     const totalTax = validOrders.reduce((acc, o) => acc + o.taxReserveAmount, 0);
     const netOperatingProfit = validOrders.reduce((acc, o) => acc + o.netProfit, 0);
 
-    const totalPurchases = state.invoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
+    const totalPurchases = periodInvoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
     const totalFixedCosts = state.fixedCosts.reduce((acc, fc) => acc + fc.monthlyAmount, 0);
 
     const productRows = state.products.map((product) => {
@@ -61,7 +105,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
 
     // Expense breakdown by category from invoices
     const categoryTotals: Record<string, number> = {};
-    for (const inv of state.invoices) {
+    for (const inv of periodInvoices) {
       for (const item of inv.items) {
         categoryTotals[item.category] = (categoryTotals[item.category] || 0) + item.totalPrice;
       }
@@ -76,6 +120,12 @@ export default function OverviewTab({ state, onNavigate }: Props) {
 
     return {
       ordersCount: validOrders.length,
+      cancelledCount,
+      avgTicket: validOrders.length > 0 ? grossRevenue / validOrders.length : 0,
+      topItems,
+      paymentSeries,
+      recentOrders,
+      periodInvoices,
       grossRevenue,
       totalSalesCmv,
       totalFees,
@@ -87,7 +137,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
       productRows,
       categorySeries,
     };
-  }, [state]);
+  }, [state, range]);
 
   const maxProductPrice = Math.max(
     1,
@@ -103,7 +153,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             Visão Geral
           </h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Resumo financeiro, margem por produto e compras registradas no período.
+            Receita, lucro e compras de: <strong className="text-zinc-200">{range.label}</strong>. Escolha o período ao lado.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -126,6 +176,19 @@ export default function OverviewTab({ state, onNavigate }: Props) {
         </div>
       </div>
 
+      <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] px-4 py-3">
+        <PeriodSelector
+          period={period}
+          customFrom={customFrom}
+          customTo={customTo}
+          onChange={(n) => {
+            setPeriod(n.period);
+            setCustomFrom(n.customFrom);
+            setCustomTo(n.customTo);
+          }}
+        />
+      </div>
+
       {/* Top KPI Grid (Strictly 4 columns, single row on desktop per Anti-Slop Design) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4 space-y-2">
@@ -137,9 +200,9 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             {formatBRL(analytics.grossRevenue)}
           </div>
           <div className="flex items-center justify-between text-xs text-zinc-500 pt-1 border-t border-white/[0.05]">
-            <span>Pedidos concluídos</span>
+            <span>Pedidos • ticket médio</span>
             <span className="tabular-nums text-zinc-300 font-medium">
-              {analytics.ordersCount}
+              {analytics.ordersCount} • {formatBRL(analytics.avgTicket)}
             </span>
           </div>
         </div>
@@ -185,11 +248,54 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             {formatBRL(analytics.totalPurchases)}
           </div>
           <div className="flex items-center justify-between text-xs text-zinc-500 pt-1 border-t border-white/[0.05]">
-            <span>Custos fixos mensais</span>
+            <span>Custos fixos (mensal)</span>
             <span className="tabular-nums text-zinc-300 font-medium">
               {formatBRL(analytics.totalFixedCosts)}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Itens mais vendidos e formas de pagamento no período */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-zinc-100">Itens Mais Vendidos — {range.label}</h2>
+          {analytics.topItems.length === 0 ? (
+            <p className="text-xs text-zinc-500">Nenhuma venda neste período.</p>
+          ) : (
+            <div className="divide-y divide-white/[0.06] text-xs">
+              {analytics.topItems.map((it) => (
+                <div key={it.name} className="py-2 flex items-center justify-between">
+                  <span className="text-zinc-200 truncate max-w-[60%]">{it.name}</span>
+                  <span className="tabular-nums text-zinc-400">
+                    <strong className="text-zinc-100">{it.qty}x</strong> • {formatBRL(it.revenue)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-100">Formas de Pagamento</h2>
+            {analytics.cancelledCount > 0 && (
+              <span className="text-[11px] text-rose-400">{analytics.cancelledCount} cancelado(s)</span>
+            )}
+          </div>
+          {analytics.paymentSeries.length === 0 ? (
+            <p className="text-xs text-zinc-500">Nenhuma venda neste período.</p>
+          ) : (
+            <div className="divide-y divide-white/[0.06] text-xs">
+              {analytics.paymentSeries.map((pm) => (
+                <div key={pm.label} className="py-2 flex items-center justify-between">
+                  <span className="text-zinc-200">{pm.label}</span>
+                  <span className="tabular-nums text-zinc-400">
+                    {pm.count} pedido(s) • <strong className="text-zinc-100">{formatBRL(pm.total)}</strong>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -310,7 +416,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
 
           <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-3">
             <h2 className="text-sm font-semibold text-zinc-100">
-              Provisões sobre Vendas Realizadas
+              Provisões sobre as Vendas do Período
             </h2>
             <div className="divide-y divide-white/[0.06] text-xs">
               <div className="py-2 flex items-center justify-between">
@@ -326,13 +432,13 @@ export default function OverviewTab({ state, onNavigate }: Props) {
                 </span>
               </div>
               <div className="py-2 flex items-center justify-between">
-                <span className="text-zinc-400">Taxas Maquininha / Link</span>
+                <span className="text-zinc-400">Taxas da Maquininha</span>
                 <span className="tabular-nums font-medium text-zinc-200">
                   {formatBRL(analytics.totalFees)}
                 </span>
               </div>
               <div className="pt-2.5 flex items-center justify-between font-semibold text-emerald-400">
-                <span>Saldo Líquido Acumulado</span>
+                <span>Lucro Líquido do Período</span>
                 <span className="tabular-nums">
                   {formatBRL(analytics.netOperatingProfit)}
                 </span>
@@ -346,7 +452,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-zinc-200">Últimos Pedidos Registrados</h3>
+            <h3 className="text-xs font-semibold text-zinc-200">Pedidos do Período</h3>
             <button
               type="button"
               onClick={() => onNavigate('vendas')}
@@ -356,7 +462,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             </button>
           </div>
           <div className="divide-y divide-white/[0.06] text-xs">
-            {state.orders.slice(0, 5).map((ord) => (
+            {analytics.recentOrders.slice(0, 8).map((ord) => (
               <div key={ord.id} className="px-4 py-2.5 flex items-center justify-between">
                 <div>
                   <span className="font-medium text-zinc-200">
@@ -379,7 +485,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
 
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
           <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-zinc-200">Últimas Notas Fiscais e Compras</h3>
+            <h3 className="text-xs font-semibold text-zinc-200">Notas Fiscais e Compras do Período</h3>
             <button
               type="button"
               onClick={() => onNavigate('notas')}
@@ -389,7 +495,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             </button>
           </div>
           <div className="divide-y divide-white/[0.06] text-xs">
-            {state.invoices.slice(0, 5).map((inv) => (
+            {analytics.periodInvoices.slice(0, 8).map((inv) => (
               <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between">
                 <div>
                   <span className="font-medium text-zinc-200">{inv.supplier}</span>

@@ -18,12 +18,18 @@ import {
   Copy,
   ExternalLink,
   MessageCircle,
-  PhoneCall,
   Plus,
-  QrCode,
   ShoppingBag,
   Trash2,
 } from 'lucide-react';
+import PeriodSelector from './PeriodSelector';
+import {
+  isDateInRange,
+  orderLocalDate,
+  PeriodKey,
+  resolvePeriod,
+  toLocalDate,
+} from '@/lib/periods';
 import { useMemo, useState } from 'react';
 
 interface Props {
@@ -36,6 +42,9 @@ export default function SalesTab({ state, onUpdateState }: Props) {
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>('PIX');
   const [posCart, setPosCart] = useState<Record<string, number>>({});
+  const [histPeriod, setHistPeriod] = useState<PeriodKey>('hoje');
+  const [histFrom, setHistFrom] = useState('');
+  const [histTo, setHistTo] = useState('');
 
   function addPosQty(productId: string, delta: number) {
     setPosCart((prev) => {
@@ -105,7 +114,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
     }
 
     const nowIso = new Date().toISOString();
-    const todayDate = nowIso.slice(0, 10);
+    const todayDate = toLocalDate(nowIso);
     const cleanPhone = normalizePhone(customerPhone) || '00000000000';
 
     onUpdateState((prev) => {
@@ -201,10 +210,38 @@ export default function SalesTab({ state, onUpdateState }: Props) {
   }
 
   function handleDeleteOrder(orderId: string) {
+    const target = state.orders.find((o) => o.id === orderId);
+    if (!target) return;
     if (!confirm('Remover este registro de venda?')) return;
+
+    // Cliente fica órfão se não tiver mais nenhum outro pedido
+    const remaining = state.orders.filter((o) => o.id !== orderId);
+    const phoneDigits = normalizePhone(target.customerPhone || '');
+    const customer = state.customers.find(
+      (c) =>
+        c.id === target.customerId ||
+        (phoneDigits.length >= 8 && normalizePhone(c.phone) === phoneDigits)
+    );
+    const hasOtherOrders =
+      customer &&
+      remaining.some(
+        (o) =>
+          o.customerId === customer.id ||
+          (phoneDigits.length >= 8 && normalizePhone(o.customerPhone || '') === phoneDigits)
+      );
+    const removeCustomerToo =
+      Boolean(customer) &&
+      !hasOtherOrders &&
+      confirm(
+        `O cliente "${customer!.name}" não tem mais nenhum pedido. Deseja remover também esse cliente da base de Clientes (CRM)?`
+      );
+
     onUpdateState((prev) => ({
       ...prev,
       orders: prev.orders.filter((o) => o.id !== orderId),
+      customers: removeCustomerToo
+        ? prev.customers.filter((c) => c.id !== customer!.id)
+        : prev.customers,
     }));
   }
 
@@ -217,38 +254,48 @@ export default function SalesTab({ state, onUpdateState }: Props) {
     }));
   }
 
-  const totals = useMemo(() => {
-    const valid = state.orders.filter((o) => o.status !== 'Cancelado');
-    return {
-      count: valid.length,
-      grossRevenue: valid.reduce((a, b) => a + b.totalAmount, 0),
-      totalCmv: valid.reduce((a, b) => a + b.totalCmv, 0),
-      totalFees: valid.reduce((a, b) => a + b.paymentFeeAmount, 0),
-      totalTaxReserve: valid.reduce((a, b) => a + b.taxReserveAmount, 0),
-      netProfit: valid.reduce((a, b) => a + b.netProfit, 0),
-    };
-  }, [state.orders]);
-
   // Fila ativa em tempo real: apenas pedidos que ainda não foram entregues nem cancelados
   const activeQueueOrders = useMemo(() => {
-    return state.orders.filter(
-      (o) => o.status === 'Novo Pedido' || o.status === 'Em Preparo' || o.status === 'Saiu para Entrega'
-    );
+    // Ordem de produção: o pedido mais antigo aparece primeiro (FIFO)
+    return state.orders
+      .filter(
+        (o) => o.status === 'Novo Pedido' || o.status === 'Em Preparo' || o.status === 'Saiu para Entrega'
+      )
+      .sort((x, y) => (x.createdAt || '').localeCompare(y.createdAt || ''));
   }, [state.orders]);
 
-  // Histórico de pedidos finalizados (Entregues ou Cancelados)
-  const completedHistoryOrders = useMemo(() => {
-    return state.orders.filter((o) => o.status === 'Entregue' || o.status === 'Cancelado');
-  }, [state.orders]);
+  // Histórico de pedidos finalizados (Entregues ou Cancelados), filtrado por período
+  const historyRange = useMemo(
+    () => resolvePeriod(histPeriod, { from: histFrom, to: histTo }),
+    [histPeriod, histFrom, histTo]
+  );
+  const allCompletedOrders = useMemo(
+    () =>
+      state.orders
+        .filter((o) => o.status === 'Entregue' || o.status === 'Cancelado')
+        .sort((x, y) => (y.createdAt || '').localeCompare(x.createdAt || '')),
+    [state.orders]
+  );
+  const completedHistoryOrders = useMemo(
+    () => allCompletedOrders.filter((o) => isDateInRange(orderLocalDate(o), historyRange)),
+    [allCompletedOrders, historyRange]
+  );
+  const historyTotal = useMemo(
+    () =>
+      completedHistoryOrders
+        .filter((o) => o.status === 'Entregue')
+        .reduce((acc, o) => acc + o.totalAmount, 0),
+    [completedHistoryOrders]
+  );
 
   return (
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/[0.08]">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Vendas e Pedidos</h1>
+          <h1 className="text-xl font-semibold text-zinc-100">Fila de Pedidos & Vendas</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Fila de produção com alerta sonoro, destino do WhatsApp da loja e registro de caixa.
+            Fila de produção em tempo real, lançamento manual (PDV) e histórico de pedidos concluídos.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -281,124 +328,6 @@ export default function SalesTab({ state, onUpdateState }: Props) {
             <ExternalLink className="size-3.5 text-zinc-400" />
             Abrir Cardápio Oficial
           </a>
-        </div>
-      </div>
-
-      {/* Quick Store Reception Settings (WhatsApp, PIX Key & Tempo de Entrega) */}
-      <div className="bg-[#121215] border border-orange-500/25 rounded-[10px] p-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs">
-        <div>
-          <label className="text-zinc-300 font-medium flex items-center gap-1.5 mb-1">
-            <PhoneCall className="size-3.5 text-emerald-400" />
-            WhatsApp da Loja
-          </label>
-          <input
-            type="tel"
-            value={state.settings.whatsappNumber}
-            onChange={(e) =>
-              onUpdateState((prev) => ({
-                ...prev,
-                settings: { ...prev.settings, whatsappNumber: e.target.value },
-              }))
-            }
-            placeholder="Ex: 5586999999999"
-            className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100 font-mono"
-          />
-        </div>
-        <div>
-          <label className="text-zinc-300 font-medium flex items-center gap-1.5 mb-1">
-            <QrCode className="size-3.5 text-orange-400" />
-            Chave PIX Oficial
-          </label>
-          <input
-            type="text"
-            value={state.settings.pixKey}
-            onChange={(e) =>
-              onUpdateState((prev) => ({
-                ...prev,
-                settings: { ...prev.settings, pixKey: e.target.value },
-              }))
-            }
-            placeholder="CPF, CNPJ, Celular, E-mail ou Chave Aleatória"
-            className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100 font-mono"
-          />
-        </div>
-        <div>
-          <label className="text-zinc-300 font-medium block mb-1">
-            Nome Favorecido PIX
-          </label>
-          <input
-            type="text"
-            value={state.settings.pixBeneficiary}
-            onChange={(e) =>
-              onUpdateState((prev) => ({
-                ...prev,
-                settings: { ...prev.settings, pixBeneficiary: e.target.value },
-              }))
-            }
-            placeholder="Seu Nome ou Razão Social"
-            className="w-full bg-[#09090b] border border-white/[0.12] rounded-[6px] px-3 py-1.5 text-zinc-100"
-          />
-        </div>
-        <div>
-          <label className="text-zinc-300 font-medium block mb-1">
-            Tempo Estimado no Cardápio
-          </label>
-          <input
-            type="text"
-            value={state.settings.estimatedDeliveryMinutes || ''}
-            onChange={(e) =>
-              onUpdateState((prev) => ({
-                ...prev,
-                settings: { ...prev.settings, estimatedDeliveryMinutes: e.target.value },
-              }))
-            }
-            placeholder="Ex: 40-50 min ou 60-80 min"
-            className="w-full bg-[#09090b] border border-orange-500/40 focus-visible:border-orange-500 rounded-[6px] px-3 py-1.5 text-zinc-100 font-medium"
-            title="Altere aqui quando o movimento estiver alto para avisar os clientes no cardápio"
-          />
-        </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 tabular-nums">
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4">
-          <p className="text-xs text-zinc-400">Faturamento Bruto</p>
-          <p className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatBRL(totals.grossRevenue)}
-          </p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">{totals.count} vendas</p>
-        </div>
-
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4">
-          <p className="text-xs text-zinc-400">Reposição Insumos (CMV)</p>
-          <p className="text-xl font-semibold text-rose-400 mt-1">
-            {formatBRL(totals.totalCmv)}
-          </p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">Custo de mercadoria</p>
-        </div>
-
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4">
-          <p className="text-xs text-zinc-400">Reserva Fiscal (MEI)</p>
-          <p className="text-xl font-semibold text-zinc-200 mt-1">
-            {formatBRL(totals.totalTaxReserve)}
-          </p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">Provisão estimada</p>
-        </div>
-
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4">
-          <p className="text-xs text-zinc-400">Taxas de Maquininha</p>
-          <p className="text-xl font-semibold text-zinc-200 mt-1">
-            {formatBRL(totals.totalFees)}
-          </p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">Crédito / Débito</p>
-        </div>
-
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4 col-span-2 sm:col-span-1">
-          <p className="text-xs text-emerald-400 font-medium">Lucro Líquido</p>
-          <p className="text-xl font-semibold text-emerald-400 mt-1">
-            {formatBRL(totals.netProfit)}
-          </p>
-          <p className="text-[11px] text-zinc-400 mt-0.5">Livre após deduções</p>
         </div>
       </div>
 
@@ -655,75 +584,98 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         </div>
       </div>
 
-      {/* Histórico de Pedidos Concluídos / Entregues */}
-      {completedHistoryOrders.length > 0 && (
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
-          <div className="px-4 py-3 bg-[#18181c]/60 border-b border-white/[0.08] flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-zinc-300">
-              Histórico de Vendas Concluídas ({completedHistoryOrders.length})
+      {/* Histórico de Pedidos Concluídos com filtro de período */}
+      <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
+        <div className="px-4 py-3 bg-[#18181c]/60 border-b border-white/[0.08] space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-zinc-200">
+              Histórico de Pedidos Concluídos — {historyRange.label}
             </h3>
-            <span className="text-[11px] text-zinc-500">Pedidos já entregues ou finalizados</span>
+            <span className="text-[11px] text-zinc-400 tabular-nums">
+              {completedHistoryOrders.length} pedidos • {formatBRL(historyTotal)} em vendas entregues
+            </span>
           </div>
-
-          <div className="divide-y divide-white/[0.06] text-xs">
-            {completedHistoryOrders.map((ord) => {
-              return (
-                <div
-                  key={ord.id}
-                  className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-zinc-300 hover:bg-white/[0.01]"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-zinc-200">#{ord.orderNumber}</span>
-                      <span className="text-zinc-100 font-medium">{ord.customerName}</span>
-                      <span className="px-2 py-0.2 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        {ord.status}
-                      </span>
-                      <span className="text-zinc-500 tabular-nums">{ord.date}</span>
-                    </div>
-                    <p className="text-[11px] text-zinc-400">
-                      {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(', ')}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right tabular-nums">
-                      <span className="font-semibold text-zinc-200">{formatBRL(ord.totalAmount)}</span>
-                      <span className="block text-[10px] text-emerald-400">
-                        Lucro: {formatBRL(ord.netProfit)}
-                      </span>
-                    </div>
-
-                    <select
-                      value={ord.status}
-                      aria-label="Reabrir status do pedido"
-                      onChange={(e) =>
-                        handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)
-                      }
-                      className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-zinc-300 text-[11px]"
-                      title="Mudar status caso queira reabrir"
-                    >
-                      <option value="Entregue">Entregue</option>
-                      <option value="Em Preparo">Reabrir: Em Preparo</option>
-                      <option value="Saiu para Entrega">Reabrir: Em Entrega</option>
-                      <option value="Cancelado">Cancelado</option>
-                    </select>
-
-                    <button
-                      type="button"
-                      aria-label="Remover do histórico"
-                      onClick={() => handleDeleteOrder(ord.id)}
-                      className="p-1 text-zinc-500 hover:text-rose-400"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <PeriodSelector
+            period={histPeriod}
+            customFrom={histFrom}
+            customTo={histTo}
+            onChange={(n) => {
+              setHistPeriod(n.period);
+              setHistFrom(n.customFrom);
+              setHistTo(n.customTo);
+            }}
+          />
         </div>
-      )}
+
+        {completedHistoryOrders.length === 0 ? (
+          <p className="p-6 text-center text-xs text-zinc-500">
+            Nenhum pedido concluído neste período.
+          </p>
+        ) : (
+          <div className="divide-y divide-white/[0.06] text-xs">
+            {completedHistoryOrders.map((ord) => (
+              <div
+                key={ord.id}
+                className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-zinc-300 hover:bg-white/[0.01]"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-zinc-200">#{ord.orderNumber}</span>
+                    <span className="text-zinc-100 font-medium">{ord.customerName}</span>
+                    <span
+                      className={`px-2 rounded text-[10px] font-medium border ${
+                        ord.status === 'Entregue'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      }`}
+                    >
+                      {ord.status}
+                    </span>
+                    <span className="text-zinc-500 tabular-nums">
+                      {new Date(ord.createdAt).toLocaleString('pt-BR', {
+                        timeZone: 'America/Sao_Paulo',
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(', ')}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right tabular-nums">
+                    <span className="font-semibold text-zinc-200">{formatBRL(ord.totalAmount)}</span>
+                  </div>
+                  <select
+                    value={ord.status}
+                    aria-label="Reabrir status do pedido"
+                    onChange={(e) => handleUpdateOrderStatus(ord.id, e.target.value as OrderStatus)}
+                    className="bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-zinc-300 text-[11px]"
+                    title="Mudar status caso queira reabrir"
+                  >
+                    <option value="Entregue">Entregue</option>
+                    <option value="Em Preparo">Reabrir: Em Preparo</option>
+                    <option value="Saiu para Entrega">Reabrir: Em Entrega</option>
+                    <option value="Cancelado">Cancelado</option>
+                  </select>
+                  <button
+                    type="button"
+                    aria-label="Remover do histórico"
+                    onClick={() => handleDeleteOrder(ord.id)}
+                    className="p-1 text-zinc-500 hover:text-rose-400"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

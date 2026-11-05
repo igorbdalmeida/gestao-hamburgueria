@@ -550,7 +550,7 @@ export const INITIAL_PRODUCTS: Product[] = [
 export const INITIAL_INVOICES: PurchaseInvoice[] = [];
 
 export const INITIAL_FIXED_COSTS: FixedCostItem[] = [
-  { id: 'fc-energia', name: 'Energia Elétrica (Freezer / Chapa / Fritadeira)', category: 'Utilidades', monthlyAmount: 240.0, dueDay: 10, paid: true },
+  { id: 'fc-energia', name: 'Energia Elétrica (Freezer / Exaustor / Fritadeira)', category: 'Utilidades', monthlyAmount: 240.0, dueDay: 10, paid: true },
   { id: 'fc-agua', name: 'Água e Saneamento', category: 'Utilidades', monthlyAmount: 65.0, dueDay: 12, paid: true },
   { id: 'fc-gas', name: 'Gás de Cozinha (Botijão P13)', category: 'Utilidades', monthlyAmount: 115.0, dueDay: 15, paid: true },
   { id: 'fc-internet', name: 'Internet Fibra + Chip Celular WhatsApp', category: 'Sistemas / Telefonia', monthlyAmount: 129.9, dueDay: 18, paid: false },

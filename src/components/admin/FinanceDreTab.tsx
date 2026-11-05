@@ -350,101 +350,11 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
         <div className="space-y-6">
           <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
             <div className="pb-3 border-b border-white/[0.08]">
-              <h2 className="text-sm font-semibold text-zinc-100">Parâmetros de Taxas e Loja</h2>
-              <p className="text-xs text-zinc-400">Configuração das maquininhas, PIX e delivery</p>
+              <h2 className="text-sm font-semibold text-zinc-100">Taxas das Maquininhas</h2>
+              <p className="text-xs text-zinc-400">Taxas usadas no cálculo do lucro líquido de cada venda (dados da loja ficam na aba Configurações)</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="text-zinc-400 block mb-1">Nome do Estabelecimento</label>
-                <input
-                  type="text"
-                  value={state.settings.storeName}
-                  onChange={(e) =>
-                    onUpdateState((prev) => ({
-                      ...prev,
-                      settings: { ...prev.settings, storeName: e.target.value },
-                    }))
-                  }
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="text-zinc-400 block mb-1">Subtítulo do Cardápio</label>
-                <input
-                  type="text"
-                  value={state.settings.storeSubtitle}
-                  onChange={(e) =>
-                    onUpdateState((prev) => ({
-                      ...prev,
-                      settings: { ...prev.settings, storeSubtitle: e.target.value },
-                    }))
-                  }
-                  placeholder="Ex: Burger Artesanal na Brasa • Delivery Rápido"
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="text-zinc-400 block mb-1">WhatsApp para Receber Pedidos</label>
-                <input
-                  type="text"
-                  value={state.settings.whatsappNumber}
-                  onChange={(e) =>
-                    onUpdateState((prev) => ({
-                      ...prev,
-                      settings: { ...prev.settings, whatsappNumber: e.target.value },
-                    }))
-                  }
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100 font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-zinc-400 block mb-1">Chave PIX (Mercado Pago / Conta)</label>
-                <input
-                  type="text"
-                  value={state.settings.pixKey}
-                  onChange={(e) =>
-                    onUpdateState((prev) => ({
-                      ...prev,
-                      settings: { ...prev.settings, pixKey: e.target.value },
-                    }))
-                  }
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100 font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-zinc-400 block mb-1">Tempo Estimado de Entrega (Cardápio)</label>
-                <input
-                  type="text"
-                  value={state.settings.estimatedDeliveryMinutes}
-                  onChange={(e) =>
-                    onUpdateState((prev) => ({
-                      ...prev,
-                      settings: { ...prev.settings, estimatedDeliveryMinutes: e.target.value },
-                    }))
-                  }
-                  placeholder="Ex: 40 - 55 min ou 60 - 80 min"
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="text-zinc-400 block mb-1">Taxa de Entrega Padrão (R$)</label>
-                <input
-                  type="number"
-                  step="0.50"
-                  value={state.settings.deliveryFeeDefault}
-                  onChange={(e) =>
-                    onUpdateState((prev) => ({
-                      ...prev,
-                      settings: {
-                        ...prev.settings,
-                        deliveryFeeDefault: parseFloat(e.target.value) || 0,
-                      },
-                    }))
-                  }
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100 tabular-nums"
-                />
-              </div>
 
               <div>
                 <label className="text-zinc-400 block mb-1">
@@ -486,26 +396,6 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
                   className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-1.5 text-zinc-100 tabular-nums"
                 />
               </div>
-            </div>
-
-            <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3.5 flex items-center justify-between text-xs">
-              <span className="text-zinc-300">Status da Loja no Cardápio Virtual</span>
-              <button
-                type="button"
-                onClick={() =>
-                  onUpdateState((prev) => ({
-                    ...prev,
-                    settings: { ...prev.settings, storeOpen: !prev.settings.storeOpen },
-                  }))
-                }
-                className={`px-3 py-1.5 rounded-[6px] font-medium text-xs transition ${
-                  state.settings.storeOpen
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                }`}
-              >
-                {state.settings.storeOpen ? 'Aberto para Pedidos' : 'Fechado no Momento'}
-              </button>
             </div>
           </div>
 

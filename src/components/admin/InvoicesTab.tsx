@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { todayLocal } from '@/lib/periods';
 
 interface Props {
   state: AppDatabaseState;
@@ -32,7 +33,7 @@ interface Props {
 export default function InvoicesTab({ state, onUpdateState }: Props) {
   const [entryMode, setEntryMode] = useState<'ia' | 'xml' | 'manual'>('ia');
 
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayLocal());
   const [supplier, setSupplier] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [paymentMethod, setPaymentMethod] =
@@ -156,20 +157,77 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
 
   async function handleReceiptPhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setErrorMessage(null);
     setStatusMessage(null);
-    try {
-      const compressed = await compressImageFile(file, {
-        maxWidth: 1400,
-        maxHeight: 1400,
-        quality: 0.85,
+
+    const MAX_RAW_BYTES = 3.3 * 1024 * 1024; // limite seguro do corpo da requisição (4,5 MB)
+    const lowerName = file.name.toLowerCase();
+    const isPdf = file.type === 'application/pdf' || lowerName.endsWith('.pdf');
+    const isHeic =
+      /heic|heif/.test(file.type) || lowerName.endsWith('.heic') || lowerName.endsWith('.heif');
+
+    const readAsDataUrl = (f: File) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('read'));
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsDataURL(f);
       });
-      setReceiptPhotoPreview(compressed.dataUrl);
-      setReceiptBase64(compressed.base64);
-      setReceiptMimeType(compressed.mimeType);
+
+    try {
+      if (isPdf) {
+        if (file.size > MAX_RAW_BYTES) {
+          setErrorMessage('Este PDF é muito grande (máx. 3 MB). Envie uma foto da nota ou um PDF menor.');
+          return;
+        }
+        const dataUrl = await readAsDataUrl(file);
+        setReceiptPhotoPreview(
+          'data:image/svg+xml;utf8,' +
+            encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="96"><rect width="80" height="96" fill="#18181c"/><text x="40" y="54" font-size="22" font-family="Arial" font-weight="bold" fill="#ff5400" text-anchor="middle">PDF</text></svg>'
+            )
+        );
+        setReceiptBase64(dataUrl.replace(/^data:[^;]+;base64,/, ''));
+        setReceiptMimeType('application/pdf');
+        return;
+      }
+
+      try {
+        // Notas/cupons são compridos: mantém resolução alta para o texto continuar legível
+        let compressed = await compressImageFile(file, {
+          maxWidth: 2000,
+          maxHeight: 3200,
+          quality: 0.8,
+        });
+        if (compressed.base64.length > MAX_RAW_BYTES * 1.33) {
+          compressed = await compressImageFile(file, {
+            maxWidth: 1600,
+            maxHeight: 2600,
+            quality: 0.7,
+          });
+        }
+        setReceiptPhotoPreview(compressed.dataUrl);
+        setReceiptBase64(compressed.base64);
+        setReceiptMimeType(compressed.mimeType);
+      } catch {
+        // Se o navegador não conseguiu redimensionar, envia o arquivo original quando for compatível
+        if (!isHeic && /^image\/(jpeg|png|webp)$/.test(file.type) && file.size <= MAX_RAW_BYTES) {
+          const dataUrl = await readAsDataUrl(file);
+          setReceiptPhotoPreview(dataUrl);
+          setReceiptBase64(dataUrl.replace(/^data:[^;]+;base64,/, ''));
+          setReceiptMimeType(file.type);
+        } else if (isHeic) {
+          setErrorMessage(
+            'Fotos em formato HEIC (iPhone) não abrem aqui. No iPhone, vá em Ajustes > Câmera > Formatos e escolha "Mais Compatível", ou tire um print da nota e envie o print.'
+          );
+        } else {
+          setErrorMessage('Não foi possível ler este arquivo. Envie uma foto JPG/PNG da nota ou um PDF.');
+        }
+      }
     } catch {
-      setErrorMessage('Não foi possível carregar esta imagem. Tente outro arquivo.');
+      setErrorMessage('Não foi possível carregar este arquivo. Tente outro.');
     }
   }
 
@@ -196,7 +254,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
       if (res.ok && data.ok && data.invoice) {
         const inv = data.invoice;
         setSupplier(inv.supplier || 'Fornecedor');
-        setDate(inv.date || new Date().toISOString().slice(0, 10));
+        setDate(inv.date || todayLocal());
         setInvoiceNumber(inv.invoiceNumber || `CUPOM-${Math.floor(1000 + Math.random() * 9000)}`);
         if (inv.paymentMethod) setPaymentMethod(inv.paymentMethod);
 
@@ -481,7 +539,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                   </span>
                 </div>
                 <p className="text-zinc-400">
-                  Tire uma foto do cupom fiscal pelo celular ou envie a imagem da nota para extrair o local, a data e todos os itens automaticamente.
+                  Tire uma foto do cupom fiscal pelo celular ou envie a imagem/PDF da nota para extrair o local, a data e todos os itens automaticamente.
                 </p>
               </div>
 
@@ -491,7 +549,7 @@ export default function InvoicesTab({ state, onUpdateState }: Props) {
                   <span>{receiptPhotoPreview ? 'Trocar Foto da Nota' : 'Tirar Foto / Escolher Imagem'}</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/*,application/pdf,.pdf"
                     onChange={handleReceiptPhotoSelect}
                     className="hidden"
                   />

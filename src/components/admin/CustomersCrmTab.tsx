@@ -1,6 +1,7 @@
 'use client';
 
 import { formatBRL, formatPhoneBR, normalizePhone } from '@/lib/pricing';
+import { todayLocal } from '@/lib/periods';
 import { AppDatabaseState, CustomerProfile } from '@/lib/types';
 import {
   Download,
@@ -63,6 +64,57 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
     });
   }
 
+  // Pedidos válidos (não cancelados) de um cliente, pelo id ou telefone
+  function ordersOfCustomer(c: CustomerProfile) {
+    const digits = normalizePhone(c.phone);
+    return state.orders.filter(
+      (o) =>
+        o.customerId === c.id ||
+        (digits.length >= 8 && normalizePhone(o.customerPhone || '') === digits)
+    );
+  }
+
+  const orphanCustomers = useMemo(
+    () => state.customers.filter((c) => ordersOfCustomer(c).length === 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.customers, state.orders]
+  );
+
+  // Remove clientes sem nenhum pedido e recalcula as métricas dos demais a partir dos pedidos reais
+  function handlePruneAndResync() {
+    const orphanIds = new Set(orphanCustomers.map((c) => c.id));
+    const msg =
+      orphanCustomers.length > 0
+        ? `Remover ${orphanCustomers.length} cliente(s) sem nenhum pedido e recalcular os totais dos demais com base nos pedidos existentes?`
+        : 'Todos os clientes têm pedidos. Recalcular os totais (pedidos, gasto e ticket médio) com base nos pedidos existentes?';
+    if (!confirm(msg)) return;
+
+    onUpdateState((prev) => {
+      const digitsOf = (v: string) => normalizePhone(v || '');
+      const customers = prev.customers
+        .filter((c) => !orphanIds.has(c.id))
+        .map((c) => {
+          const d = digitsOf(c.phone);
+          const own = prev.orders.filter(
+            (o) =>
+              o.status !== 'Cancelado' &&
+              (o.customerId === c.id || (d.length >= 8 && digitsOf(o.customerPhone) === d))
+          );
+          const totalSpent = own.reduce((a, o) => a + o.totalAmount, 0);
+          const last = own.map((o) => o.createdAt).sort().pop();
+          return {
+            ...c,
+            totalOrders: own.length,
+            totalSpent,
+            averageTicket: own.length > 0 ? totalSpent / own.length : 0,
+            lastOrderAt: last || c.lastOrderAt,
+          };
+        });
+      return { ...prev, customers };
+    });
+    if (orphanIds.has(selectedId)) setSelectedId('');
+  }
+
   function handleClearAllCustomers() {
     if (state.customers.length === 0) return;
     if (!confirm('Deseja zerar toda a lista de clientes cadastrados no CRM?')) return;
@@ -76,7 +128,7 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
   function handleRegisterGift(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedCustomer || !newGiftDesc.trim()) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocal();
 
     onUpdateState((prev) => ({
       ...prev,
@@ -135,7 +187,7 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `clientes_delivery_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `clientes_delivery_${todayLocal()}.csv`;
     a.click();
   }
 
@@ -156,6 +208,21 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {state.customers.length > 0 && (
+            <button
+              type="button"
+              onClick={handlePruneAndResync}
+              className="btn-saas-secondary text-xs"
+              title="Remove clientes que não têm mais pedidos (ex: clientes de teste) e corrige os totais"
+            >
+              <Trash2 className="size-3.5 text-amber-400" /> Limpar clientes sem pedidos
+              {orphanCustomers.length > 0 && (
+                <span className="ml-1 px-1.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-semibold">
+                  {orphanCustomers.length}
+                </span>
+              )}
+            </button>
+          )}
           {state.customers.length > 0 && (
             <button
               type="button"

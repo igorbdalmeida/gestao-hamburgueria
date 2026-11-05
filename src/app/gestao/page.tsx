@@ -8,6 +8,7 @@ import OverviewTab from '@/components/admin/OverviewTab';
 import PricingTab from '@/components/admin/PricingTab';
 import RecipesTab from '@/components/admin/RecipesTab';
 import SalesTab from '@/components/admin/SalesTab';
+import StoreSettingsTab from '@/components/admin/StoreSettingsTab';
 import { INITIAL_STATE } from '@/lib/initial-data';
 import { formatBRL } from '@/lib/pricing';
 import { AppDatabaseState, SaleOrder } from '@/lib/types';
@@ -28,6 +29,7 @@ import {
   Receipt,
   RefreshCw,
   Save,
+  Settings,
   ShieldCheck,
   ShoppingBag,
   Users,
@@ -42,7 +44,8 @@ type AdminTabId =
   | 'notas'
   | 'vendas'
   | 'clientes'
-  | 'financeiro';
+  | 'financeiro'
+  | 'configuracoes';
 
 // Campainha sonora estilo cozinha / iFood usando Web Audio API (não depende de arquivo MP3 externo)
 function playKitchenBell() {
@@ -501,6 +504,11 @@ export default function AdminManagementPage() {
       label: 'Custos Fixos, DRE & Senha',
       icon: <BarChart3 className="size-3.5" />,
     },
+    {
+      id: 'configuracoes',
+      label: 'Configurações',
+      icon: <Settings className="size-3.5" />,
+    },
   ];
 
   return (
@@ -699,6 +707,9 @@ export default function AdminManagementPage() {
         )}
         {activeTab === 'clientes' && (
           <CustomersCrmTab state={state} onUpdateState={handleUpdateState} />
+        )}
+        {activeTab === 'configuracoes' && (
+          <StoreSettingsTab state={state} onUpdateState={handleUpdateState} />
         )}
         {activeTab === 'financeiro' && (
           <FinanceDreTab state={state} onUpdateState={handleUpdateState} />

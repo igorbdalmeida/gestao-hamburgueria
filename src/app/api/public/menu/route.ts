@@ -9,6 +9,7 @@ import {
 import { OrderItem, OrderPaymentMethod, SaleOrder } from '@/lib/types';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { toLocalDate } from '@/lib/periods';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,7 +153,7 @@ export async function POST(request: Request) {
     }
 
     const nowIso = new Date().toISOString();
-    const todayDate = nowIso.slice(0, 10);
+    const todayDate = toLocalDate(nowIso);
 
     // Calculate internal CMV & profit metrics silently on server
     const orderItems: OrderItem[] = [];

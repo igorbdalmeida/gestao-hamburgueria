@@ -1,6 +1,7 @@
 import { isAdminAuthenticated } from '@/lib/auth';
 import { loadAppState } from '@/lib/db';
 import { NextResponse } from 'next/server';
+import { todayLocal } from '@/lib/periods';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,45 +128,60 @@ export async function POST(request: Request) {
     const cleanBase64 = imageBase64 ? imageBase64.replace(/^data:[^;]+;base64,/, '') : '';
     const mediaMime = mimeType || 'image/jpeg';
 
-    // Tier 1: Google Gemini 2.5 Flash Multimodal (Vision + Text)
+    // Tier 1: Google Gemini (visão + texto). Tenta modelos em ordem e guarda o motivo da falha.
+    let geminiError = '';
     if (geminiKey) {
-      try {
-        const parts: Record<string, unknown>[] = [{ text: RECEIPT_SYSTEM_PROMPT }];
-        if (rawText?.trim()) {
-          parts.push({ text: `Texto complementar da nota/cupom:\n${rawText}` });
-        }
-        if (cleanBase64) {
-          parts.push({
-            inline_data: {
-              mime_type: mediaMime,
-              data: cleanBase64,
-            },
-          });
-        }
+      const parts: Record<string, unknown>[] = [{ text: RECEIPT_SYSTEM_PROMPT }];
+      if (rawText?.trim()) {
+        parts.push({ text: `Texto complementar da nota/cupom:\n${rawText}` });
+      }
+      if (cleanBase64) {
+        parts.push({ inline_data: { mime_type: mediaMime, data: cleanBase64 } });
+      }
 
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts }],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1,
-              },
-            }),
+      for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+              body: JSON.stringify({
+                contents: [{ parts }],
+                generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+              }),
+            }
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const textOut = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const parsed = textOut ? JSON.parse(cleanJsonOutput(textOut)) : null;
+            if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+              return NextResponse.json({ ok: true, mode: 'gemini-flash-vision', invoice: parsed });
+            }
+            geminiError = 'A IA leu a imagem mas não encontrou itens de compra. Tente uma foto mais nítida e de frente.';
+            break;
           }
-        );
 
-        if (response.ok) {
-          const data = await response.json();
-          const textOut = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-          const parsed = JSON.parse(cleanJsonOutput(textOut));
-          return NextResponse.json({ ok: true, mode: 'gemini-flash-vision', invoice: parsed });
+          const errBody = await response.text().catch(() => '');
+          if (response.status === 400 && /API key|API_KEY/i.test(errBody)) {
+            geminiError = 'A chave do Gemini informada é inválida. Confira em Configurações.';
+            break;
+          }
+          if (response.status === 403) {
+            geminiError = 'A chave do Gemini não tem permissão. Gere uma nova chave em aistudio.google.com/apikey.';
+            break;
+          }
+          if (response.status === 429) {
+            geminiError = 'Limite gratuito do Gemini atingido por agora. Aguarde um minuto e tente novamente.';
+            continue;
+          }
+          geminiError = `O Gemini não conseguiu processar este arquivo (erro ${response.status}).`;
+        } catch (e) {
+          console.error('Gemini receipt error:', e);
+          geminiError = 'Falha ao conversar com o Gemini. Tente novamente.';
         }
-      } catch {
-        // Proceed to next tier
       }
     }
 
@@ -239,7 +255,7 @@ export async function POST(request: Request) {
 
     const extractedItems = [];
     let supplier = 'Atacadão / Fornecedor Local';
-    const date = new Date().toISOString().slice(0, 10);
+    const date = todayLocal();
 
     for (const line of lines) {
       if (/^(FORNECEDOR|MERCADO|ATACADAO|ATACADÃO|ASSAI|ASSAÍ|DISTRIBUIDORA)[:\s-]/i.test(line)) {
@@ -320,7 +336,10 @@ export async function POST(request: Request) {
         {
           ok: false,
           error:
-            'Não foi possível identificar os itens na imagem enviada. Tente aproximar a foto dos itens e valores do cupom ou digite os itens abaixo.',
+            geminiError ||
+            (geminiKey
+              ? 'Não foi possível identificar os itens na imagem enviada. Tente uma foto mais nítida, de frente e com boa luz.'
+              : 'A leitura automática precisa de uma chave gratuita do Google Gemini. Cadastre em Configurações > Leitura de Notas Fiscais com IA (leva 1 minuto) ou cole os itens como texto.'),
         },
         { status: 422 }
       );
