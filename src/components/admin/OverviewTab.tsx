@@ -81,9 +81,10 @@ export default function OverviewTab({ state, onNavigate }: Props) {
       (b.createdAt || '').localeCompare(a.createdAt || '')
     );
 
-    // Acumulado de custos fixos em dias anteriores do mesmo mês (para saber se o mês já quitou os fixos)
+    // Acumulado de custos fixos e impostos em dias anteriores do mesmo mês (para saber se o mês já quitou os tetos)
     const refMonthPrefix = (range.from || orderLocalDate(validOrders[0] || { date: '' }) || new Date().toISOString().slice(0, 10)).slice(0, 7);
     let priorFixedCostAccumulated = 0;
+    let priorTaxAccumulated = 0;
     if (range.from) {
       for (const o of state.orders) {
         if (o.status === 'Cancelado') continue;
@@ -91,6 +92,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
         if (d.startsWith(refMonthPrefix) && d < range.from) {
           const fin = calculateOrderFinancials(o, state.products, state.ingredients, state.settings);
           priorFixedCostAccumulated += fin.fixedCostAllocationAmount;
+          priorTaxAccumulated += fin.taxReserveAmount;
         }
       }
     }
@@ -101,7 +103,8 @@ export default function OverviewTab({ state, onNavigate }: Props) {
       state.ingredients,
       state.fixedCosts,
       state.settings,
-      priorFixedCostAccumulated
+      priorFixedCostAccumulated,
+      priorTaxAccumulated
     );
 
     const totalPurchases = periodInvoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
@@ -151,14 +154,20 @@ export default function OverviewTab({ state, onNavigate }: Props) {
       grossRevenue: finSummary.grossRevenue,
       totalSalesCmv: finSummary.totalSalesCmv,
       totalTax: finSummary.totalTaxReserve,
+      taxOverflowToProfit: finSummary.taxOverflowToProfit,
+      totalMonthlyTaxTarget: finSummary.totalMonthlyTaxTarget,
+      totalMonthTaxAccumulated: finSummary.totalMonthTaxAccumulated,
+      taxCoveragePct: finSummary.taxCoveragePct,
+      isTaxFullyPaid: finSummary.isTaxFullyPaid,
       totalDeliveryDriver: finSummary.totalDeliveryDriverReserve,
       totalCardMachineFee: finSummary.totalCardMachineFee,
       rawFixedCostReserve: finSummary.rawFixedCostReserve,
       effectiveFixedCost: finSummary.effectiveFixedCost,
-      fixedCostOverflowToProfit: finSummary.fixedCostOverflowToProfit,
+      fixedCostOverflowToProfit: finSummary.fixedCostOverflowToProfit + finSummary.taxOverflowToProfit,
       baseNetProfit: finSummary.baseNetProfit,
       netOperatingProfit: finSummary.realNetProfit,
       totalFixedCosts: finSummary.totalMonthlyFixedTarget,
+      totalMonthlyAllBills: finSummary.totalMonthlyAllBills,
       totalMonthFixedAccumulated: finSummary.totalMonthFixedAccumulated,
       fixedCostCoveragePct: finSummary.fixedCostCoveragePct,
       isFixedCostFullyPaid: finSummary.isFixedCostFullyPaid,
@@ -490,21 +499,39 @@ export default function OverviewTab({ state, onNavigate }: Props) {
                   </span>
                 </span>
               </div>
-              <div className="py-2 flex items-center justify-between">
-                <span className="text-zinc-400">2. Reserva de Impostos (MEI)</span>
-                <span className="tabular-nums font-medium text-zinc-200">
-                  {formatBRL(analytics.totalTax)}{' '}
-                  <span className="text-zinc-500 font-normal">
-                    (
-                    {formatPct(
-                      analytics.grossRevenue > 0
-                        ? analytics.totalTax / analytics.grossRevenue
-                        : 0,
-                      1
-                    )}
-                    )
+              <div className="py-2 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">2. Reserva de Impostos (MEI)</span>
+                  <span className="tabular-nums font-medium text-zinc-200">
+                    {formatBRL(analytics.totalTax)}{' '}
+                    <span className="text-zinc-500 font-normal">
+                      (
+                      {formatPct(
+                        analytics.grossRevenue > 0
+                          ? analytics.totalTax / analytics.grossRevenue
+                          : 0,
+                        1
+                      )}
+                      )
+                    </span>
                   </span>
-                </span>
+                </div>
+                <p className="text-[11px] text-zinc-500 flex items-center justify-between">
+                  <span>
+                    Meta mensal MEI: {formatBRL(Math.min(analytics.totalMonthTaxAccumulated, analytics.totalMonthlyTaxTarget))} / {formatBRL(analytics.totalMonthlyTaxTarget)}
+                  </span>
+                  <span className="tabular-nums">
+                    {formatPct(analytics.taxCoveragePct, 0)} quitado
+                  </span>
+                </p>
+                {analytics.taxOverflowToProfit > 0 && (
+                  <div className="mt-1 px-2.5 py-1 rounded-[6px] bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-[11px] text-emerald-300">
+                    <span>↳ Sobra de MEI (Quitado → Lucro)</span>
+                    <span className="font-semibold tabular-nums">
+                      +{formatBRL(analytics.taxOverflowToProfit)}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="py-2 flex items-center justify-between">
                 <span className="text-orange-300 font-medium">3. Taxas do Entregador</span>

@@ -29,7 +29,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
   const [costCat, setCostCat] = useState<FixedCostItem['category']>('Utilidades');
   const [costAmount, setCostAmount] = useState('100.00');
   const [simBurgersDay, setSimBurgersDay] = useState<number>(30);
-  const [simDaysMonth, setSimDaysMonth] = useState<number>(26);
+  const [simDaysMonth, setSimDaysMonth] = useState<number>(8);
 
   // Security password change state
   const [newPassword, setNewPassword] = useState('');
@@ -132,7 +132,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
   }
 
   const summary = useMemo(() => {
-    const totalMonthlyFixed = state.fixedCosts.reduce((a, b) => a + b.monthlyAmount, 0);
+    const totalAllListedBills = state.fixedCosts.reduce((a, b) => a + b.monthlyAmount, 0);
     const totalPaidFixed = state.fixedCosts
       .filter((f) => f.paid)
       .reduce((a, b) => a + b.monthlyAmount, 0);
@@ -145,8 +145,12 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
       state.ingredients,
       state.fixedCosts,
       state.settings,
+      0,
       0
     );
+
+    const totalMonthlyFixed = periodSummary.totalMonthlyFixedTarget;
+    const totalMonthlyMei = periodSummary.totalMonthlyTaxTarget;
 
     const burgers = state.products.filter((p) => p.category === 'Hambúrgueres');
     const burgerList = burgers.length > 0 ? burgers : state.products;
@@ -168,19 +172,19 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
       burgerList.length > 0
         ? burgerList.reduce((acc, b) => acc + b.practicedPrice * b.fixedCostPct, 0) /
           burgerList.length
-        : 3.4;
+        : 2.17;
 
     const avgBurgerDeliveryAllocation =
       burgerList.length > 0
         ? burgerList.reduce((acc, b) => acc + b.practicedPrice * b.channelFeePct, 0) /
           burgerList.length
-        : 2.27;
+        : 1.36;
 
     const avgBurgerTaxAllocation =
       burgerList.length > 0
         ? burgerList.reduce((acc, b) => acc + b.practicedPrice * b.taxPct, 0) /
           burgerList.length
-        : 0.57;
+        : 0.33;
 
     const avgBurgerBaseProfit =
       avgBurgerPrice -
@@ -189,7 +193,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
       avgBurgerDeliveryAllocation -
       avgBurgerTaxAllocation;
 
-    // Quantos lanches são necessários para a provisão de Custos Fixos (15%) quitar 100% das Despesas Fixas Mensais
+    // Quantos lanches são necessários para a provisão de Custos Fixos quitar 100% das Despesas Fixas Operacionais
     const burgersToPayFixedCosts =
       avgBurgerFixedAllocation > 0
         ? Math.ceil(totalMonthlyFixed / avgBurgerFixedAllocation)
@@ -201,7 +205,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
         ? Math.ceil(periodSummary.missingToPayFixedCosts / avgBurgerFixedAllocation)
         : 0;
 
-    // Simulação para simBurgersDay x simDaysMonth
+    // Simulação para simBurgersDay x simDaysMonth (ex: 30 lanches/dia x 8 dias = 240 lanches/mês)
     const simTotalBurgersMonth = simBurgersDay * simDaysMonth;
     const simDailyRevenue = simBurgersDay * avgBurgerPrice;
     const simMonthlyRevenue = simTotalBurgersMonth * avgBurgerPrice;
@@ -209,19 +213,26 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
     const simMonthlyCmv = simTotalBurgersMonth * avgBurgerCmv;
     const simDailyDelivery = simBurgersDay * avgBurgerDeliveryAllocation;
     const simMonthlyDelivery = simTotalBurgersMonth * avgBurgerDeliveryAllocation;
-    const simDailyTax = simBurgersDay * avgBurgerTaxAllocation;
-    const simMonthlyTax = simTotalBurgersMonth * avgBurgerTaxAllocation;
+
+    const simRawTaxGenerated = simTotalBurgersMonth * avgBurgerTaxAllocation;
+    const simTaxUsed = Math.min(simRawTaxGenerated, totalMonthlyMei);
+    const simTaxOverflowToProfit = Math.max(0, simRawTaxGenerated - totalMonthlyMei);
+    const simDailyTax = simDaysMonth > 0 ? simTaxUsed / simDaysMonth : 0;
+
     const simRawFixedGenerated = simTotalBurgersMonth * avgBurgerFixedAllocation;
     const simFixedUsed = Math.min(simRawFixedGenerated, totalMonthlyFixed);
     const simFixedOverflowToProfit = Math.max(0, simRawFixedGenerated - totalMonthlyFixed);
+    const simDailyFixed = simDaysMonth > 0 ? simFixedUsed / simDaysMonth : 0;
+
     const simBaseNetProfit = simTotalBurgersMonth * avgBurgerBaseProfit;
-    const simRealNetProfit = simBaseNetProfit + simFixedOverflowToProfit;
-    const simDailyProfitBeforePayoff = simBurgersDay * avgBurgerBaseProfit;
-    const simDailyProfitAfterPayoff =
-      simBurgersDay * (avgBurgerBaseProfit + avgBurgerFixedAllocation);
+    const simRealNetProfit =
+      simBaseNetProfit + simFixedOverflowToProfit + simTaxOverflowToProfit;
+    const simDailyRealProfit = simDaysMonth > 0 ? simRealNetProfit / simDaysMonth : 0;
 
     return {
+      totalAllListedBills,
       totalMonthlyFixed,
+      totalMonthlyMei,
       totalPaidFixed,
       totalInvoicesPurchases,
       periodSummary,
@@ -229,6 +240,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
       avgBurgerCmv,
       avgBurgerFixedAllocation,
       avgBurgerDeliveryAllocation,
+      avgBurgerTaxAllocation,
       avgBurgerBaseProfit,
       burgersToPayFixedCosts,
       daysToPayFixedAtSim,
@@ -241,14 +253,13 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
       simDailyDelivery,
       simMonthlyDelivery,
       simDailyTax,
-      simMonthlyTax,
-      simRawFixedGenerated,
+      simTaxUsed,
+      simDailyFixed,
       simFixedUsed,
-      simFixedOverflowToProfit,
+      simFixedOverflowToProfit: simFixedOverflowToProfit + simTaxOverflowToProfit,
       simBaseNetProfit,
       simRealNetProfit,
-      simDailyProfitBeforePayoff,
-      simDailyProfitAfterPayoff,
+      simDailyRealProfit,
     };
   }, [state, simBurgersDay, simDaysMonth]);
 
@@ -261,7 +272,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
             Custos Fixos, DRE & Segurança
           </h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Quitação das despesas fixas mensais, conversão da sobra em lucro líquido e estudo de produção diária.
+            Planejamento para {simDaysMonth} dias de funcionamento no mês (finais de semana), quitação das contas fixas e MEI (R$ 80/mês).
           </p>
         </div>
 
@@ -289,20 +300,20 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 tabular-nums">
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-2">
           <p className="text-xs text-zinc-400 font-medium">
-            Meta p/ Quitar Custos Fixos ({formatBRL(summary.totalMonthlyFixed)}/mês)
+            Contas Mensais ({formatBRL(summary.totalMonthlyFixed)} Fixos + {formatBRL(summary.totalMonthlyMei)} MEI)
           </p>
           <p className="text-2xl font-semibold text-zinc-100">
             {summary.burgersToPayFixedCosts} lanches / mês
           </p>
           <p className="text-xs text-zinc-400">
-            Cada lanche separa em média <strong className="text-zinc-200">{formatBRL(summary.avgBurgerFixedAllocation)} (15%)</strong>. Vendendo {simBurgersDay}/dia, você quita tudo em <strong className="text-emerald-400">{summary.daysToPayFixedAtSim} dias</strong>!
+            Para quitar tudo em <strong className="text-zinc-200">{simDaysMonth} dias</strong> ({simBurgersDay} lanches/dia), você separa <strong className="text-zinc-200">{formatBRL(summary.simDailyFixed)}/dia</strong> p/ fixos e <strong className="text-zinc-200">{formatBRL(summary.simDailyTax)}/dia</strong> p/ o MEI.
           </p>
         </div>
 
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-xs text-zinc-400 font-medium">
-              Acumulado nas Vendas p/ Custos Fixos
+              Acumulado p/ Custos Fixos ({formatBRL(summary.totalMonthlyFixed)})
             </p>
             <span
               className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
@@ -334,11 +345,11 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
           <p className="text-xs text-zinc-400">
             {summary.periodSummary.isFixedCostFullyPaid ? (
               <span className="text-emerald-400 font-medium">
-                Contas fixas 100% pagas! +{formatBRL(summary.periodSummary.fixedCostOverflowToProfit)} de sobra já virou Lucro!
+                Contas fixas 100% pagas! +{formatBRL(summary.periodSummary.fixedCostOverflowToProfit)} de sobra virou Lucro!
               </span>
             ) : (
               <span>
-                Faltam <strong className="text-zinc-200">{formatBRL(summary.periodSummary.missingToPayFixedCosts)}</strong> (~{summary.remainingBurgersForMissingFixed} lanches) para o custo fixo virar sobra de lucro.
+                Faltam <strong className="text-zinc-200">{formatBRL(summary.periodSummary.missingToPayFixedCosts)}</strong> (~{summary.remainingBurgersForMissingFixed} lanches) para quitar os fixos e o excedente virar lucro.
               </span>
             )}
           </p>
@@ -352,11 +363,11 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
             {formatBRL(summary.periodSummary.realNetProfit)}
           </p>
           <p className="text-xs text-zinc-400">
-            Verba do Entregador acumulada:{' '}
+            Entregador:{' '}
             <strong className="text-orange-400">
               {formatBRL(summary.periodSummary.totalDeliveryDriverReserve)}
             </strong>{' '}
-            • Estoque (CMV): {formatBRL(summary.periodSummary.totalSalesCmv)}
+            • MEI: {formatBRL(summary.periodSummary.totalTaxReserve)}/{formatBRL(summary.totalMonthlyMei)}
           </p>
         </div>
       </div>
@@ -366,10 +377,10 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
           <div>
             <h2 className="text-sm font-semibold text-zinc-100">
-              Simulador de Viabilidade: Volume Diário, Diária do Entregador & Sobra de Custos Fixos
+              Simulador de Operação: {simDaysMonth} Dias no Mês (Sáb/Dom) • {simBurgersDay} Lanches/Dia
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Veja exatamente como os custos fixos ({formatBRL(summary.totalMonthlyFixed)}/mês) são quitados e quanto sobra de lucro líquido trabalhando com sua meta diária.
+              Divisão exata de quanto separar por dia e no mês para Reposição de Estoque, Entregador, MEI ({formatBRL(summary.totalMonthlyMei)}) e Custos Fixos ({formatBRL(summary.totalMonthlyFixed)}).
             </p>
           </div>
 
@@ -386,7 +397,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
               />
             </label>
             <label className="flex items-center gap-2 bg-[#18181c] border border-white/[0.08] rounded-[6px] px-3 py-1.5 text-zinc-300">
-              <span>Dias no mês:</span>
+              <span>Dias no mês (Sáb/Dom):</span>
               <input
                 type="number"
                 min={1}
@@ -403,12 +414,12 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs tabular-nums">
           <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3.5 space-y-1">
-            <span className="text-zinc-400">1. Faturamento Estimado</span>
+            <span className="text-zinc-400">1. Faturamento ({summary.simTotalBurgersMonth} un)</span>
             <p className="text-base font-semibold text-zinc-100">
               {formatBRL(summary.simDailyRevenue)}/dia
             </p>
             <p className="text-[11px] text-zinc-400">
-              No mês ({summary.simTotalBurgersMonth} un):{' '}
+              Nos {simDaysMonth} dias:{' '}
               <strong className="text-zinc-200">{formatBRL(summary.simMonthlyRevenue)}</strong>
             </p>
           </div>
@@ -419,41 +430,41 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
               {formatBRL(summary.simDailyCmv)}/dia
             </p>
             <p className="text-[11px] text-zinc-400">
-              No mês: <strong className="text-zinc-200">{formatBRL(summary.simMonthlyCmv)}</strong>
+              Nos {simDaysMonth} dias: <strong className="text-zinc-200">{formatBRL(summary.simMonthlyCmv)}</strong>
             </p>
           </div>
 
           <div className="bg-[#18181c] border border-orange-500/25 rounded-[8px] p-3.5 space-y-1">
-            <span className="text-orange-300 font-medium">3. Verba do Entregador</span>
+            <span className="text-orange-300 font-medium">3. Diária do Entregador</span>
             <p className="text-base font-semibold text-orange-400">
               {formatBRL(summary.simDailyDelivery)}/dia
             </p>
             <p className="text-[11px] text-zinc-400">
-              No mês: <strong className="text-orange-300">{formatBRL(summary.simMonthlyDelivery)}</strong> ({formatBRL(summary.avgBurgerDeliveryAllocation)}/un)
+              Nos {simDaysMonth} dias: <strong className="text-orange-300">{formatBRL(summary.simMonthlyDelivery)}</strong> ({formatBRL(summary.avgBurgerDeliveryAllocation)}/un)
             </p>
           </div>
 
           <div className="bg-[#18181c] border border-amber-500/25 rounded-[8px] p-3.5 space-y-1">
-            <span className="text-amber-300 font-medium">4. Custos Fixos & Sobra</span>
+            <span className="text-amber-300 font-medium">4. Fixos + Imposto MEI</span>
             <p className="text-base font-semibold text-zinc-100">
-              Quitado no {summary.daysToPayFixedAtSim}º dia!
+              {formatBRL(summary.simDailyFixed + summary.simDailyTax)}/dia
             </p>
-            <p className="text-[11px] text-emerald-400 font-medium">
-              Sobra que vira Lucro: +{formatBRL(summary.simFixedOverflowToProfit)}/mês
+            <p className="text-[11px] text-zinc-400">
+              Fixos: {formatBRL(summary.simFixedUsed)} ({formatBRL(summary.simDailyFixed)}/d) • MEI: {formatBRL(summary.simTaxUsed)} ({formatBRL(summary.simDailyTax)}/d)
             </p>
           </div>
 
           <div className="bg-[#18181c] border border-emerald-500/30 rounded-[8px] p-3.5 space-y-1">
-            <span className="text-emerald-400 font-medium">5. Lucro Líquido no Bolso</span>
+            <span className="text-emerald-400 font-medium">5. Lucro Líquido Limpo</span>
             <p className="text-base font-semibold text-emerald-400">
-              {formatBRL(summary.simRealNetProfit)}/mês
+              {formatBRL(summary.simDailyRealProfit)}/dia
             </p>
             <p className="text-[11px] text-zinc-300">
-              {formatBRL(summary.simDailyProfitBeforePayoff)}/dia → sobe p/{' '}
+              Nos {simDaysMonth} dias:{' '}
               <strong className="text-emerald-400">
-                {formatBRL(summary.simDailyProfitAfterPayoff)}/dia
+                {formatBRL(summary.simRealNetProfit)}
               </strong>{' '}
-              após {summary.daysToPayFixedAtSim}º dia
+              líquidos no bolso
             </p>
           </div>
         </div>
@@ -465,13 +476,13 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-100">Despesas Fixas Mensais</h2>
+              <h2 className="text-sm font-semibold text-zinc-100">Despesas Fixas Mensais + MEI</h2>
               <p className="text-xs text-zinc-400">
-                Pago no mês: {formatBRL(summary.totalPaidFixed)} de {formatBRL(summary.totalMonthlyFixed)}
+                Pago no mês: {formatBRL(summary.totalPaidFixed)} de {formatBRL(summary.totalAllListedBills)} ({formatBRL(summary.totalMonthlyFixed)} Fixos + {formatBRL(summary.totalMonthlyMei)} MEI)
               </p>
             </div>
             <span className="text-base font-semibold text-zinc-100 tabular-nums">
-              {formatBRL(summary.totalMonthlyFixed)}/mês
+              {formatBRL(summary.totalAllListedBills)}/mês
             </span>
           </div>
 
