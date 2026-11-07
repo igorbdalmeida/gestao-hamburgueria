@@ -185,7 +185,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         taxReserveAmount: posSummary.taxReserveAmount,
         fixedCostAllocationAmount: posSummary.fixedCostAllocationAmount,
         netProfit: posSummary.netProfit,
-        status: 'Entregue',
+        status: 'Em Preparo',
         origin: 'Lançamento Manual PDV',
       };
 
