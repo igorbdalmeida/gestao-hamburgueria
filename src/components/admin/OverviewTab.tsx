@@ -1,6 +1,12 @@
 'use client';
 
-import { calculateProductMetrics, formatBRL, formatPct } from '@/lib/pricing';
+import {
+  calculateOrderFinancials,
+  calculatePeriodFinancialSummary,
+  calculateProductMetrics,
+  formatBRL,
+  formatPct,
+} from '@/lib/pricing';
 import { AppDatabaseState } from '@/lib/types';
 import {
   ArrowRight,
@@ -75,14 +81,30 @@ export default function OverviewTab({ state, onNavigate }: Props) {
       (b.createdAt || '').localeCompare(a.createdAt || '')
     );
 
-    const grossRevenue = validOrders.reduce((acc, o) => acc + o.totalAmount, 0);
-    const totalSalesCmv = validOrders.reduce((acc, o) => acc + o.totalCmv, 0);
-    const totalFees = validOrders.reduce((acc, o) => acc + o.paymentFeeAmount, 0);
-    const totalTax = validOrders.reduce((acc, o) => acc + o.taxReserveAmount, 0);
-    const netOperatingProfit = validOrders.reduce((acc, o) => acc + o.netProfit, 0);
+    // Acumulado de custos fixos em dias anteriores do mesmo mês (para saber se o mês já quitou os fixos)
+    const refMonthPrefix = (range.from || orderLocalDate(validOrders[0] || { date: '' }) || new Date().toISOString().slice(0, 10)).slice(0, 7);
+    let priorFixedCostAccumulated = 0;
+    if (range.from) {
+      for (const o of state.orders) {
+        if (o.status === 'Cancelado') continue;
+        const d = orderLocalDate(o);
+        if (d.startsWith(refMonthPrefix) && d < range.from) {
+          const fin = calculateOrderFinancials(o, state.products, state.ingredients, state.settings);
+          priorFixedCostAccumulated += fin.fixedCostAllocationAmount;
+        }
+      }
+    }
+
+    const finSummary = calculatePeriodFinancialSummary(
+      validOrders,
+      state.products,
+      state.ingredients,
+      state.fixedCosts,
+      state.settings,
+      priorFixedCostAccumulated
+    );
 
     const totalPurchases = periodInvoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
-    const totalFixedCosts = state.fixedCosts.reduce((acc, fc) => acc + fc.monthlyAmount, 0);
 
     const productRows = state.products.map((product) => {
       const metrics = calculateProductMetrics(product, state.ingredients);
@@ -121,18 +143,27 @@ export default function OverviewTab({ state, onNavigate }: Props) {
     return {
       ordersCount: validOrders.length,
       cancelledCount,
-      avgTicket: validOrders.length > 0 ? grossRevenue / validOrders.length : 0,
+      avgTicket: validOrders.length > 0 ? finSummary.grossRevenue / validOrders.length : 0,
       topItems,
       paymentSeries,
       recentOrders,
       periodInvoices,
-      grossRevenue,
-      totalSalesCmv,
-      totalFees,
-      totalTax,
-      netOperatingProfit,
+      grossRevenue: finSummary.grossRevenue,
+      totalSalesCmv: finSummary.totalSalesCmv,
+      totalTax: finSummary.totalTaxReserve,
+      totalDeliveryDriver: finSummary.totalDeliveryDriverReserve,
+      totalCardMachineFee: finSummary.totalCardMachineFee,
+      rawFixedCostReserve: finSummary.rawFixedCostReserve,
+      effectiveFixedCost: finSummary.effectiveFixedCost,
+      fixedCostOverflowToProfit: finSummary.fixedCostOverflowToProfit,
+      baseNetProfit: finSummary.baseNetProfit,
+      netOperatingProfit: finSummary.realNetProfit,
+      totalFixedCosts: finSummary.totalMonthlyFixedTarget,
+      totalMonthFixedAccumulated: finSummary.totalMonthFixedAccumulated,
+      fixedCostCoveragePct: finSummary.fixedCostCoveragePct,
+      isFixedCostFullyPaid: finSummary.isFixedCostFullyPaid,
+      missingToPayFixedCosts: finSummary.missingToPayFixedCosts,
       totalPurchases,
-      totalFixedCosts,
       avgRealMargin,
       productRows,
       categorySeries,
@@ -216,41 +247,57 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             {formatBRL(analytics.netOperatingProfit)}
           </div>
           <div className="flex items-center justify-between text-xs text-zinc-500 pt-1 border-t border-white/[0.05]">
-            <span>Impostos + Taxas retidos</span>
+            <span>
+              {analytics.fixedCostOverflowToProfit > 0
+                ? 'Inclui sobra de fixos'
+                : 'Entregador + Impostos'}
+            </span>
             <span className="tabular-nums text-zinc-300 font-medium">
-              {formatBRL(analytics.totalTax + analytics.totalFees)}
+              {analytics.fixedCostOverflowToProfit > 0
+                ? `+${formatBRL(analytics.fixedCostOverflowToProfit)}`
+                : formatBRL(analytics.totalDeliveryDriver + analytics.totalTax)}
             </span>
           </div>
         </div>
 
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4 space-y-2">
           <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>Margem Real Média (Cardápio)</span>
-            <Percent className="size-4 text-zinc-500" />
+            <span>Taxas do Entregador (Período)</span>
+            <Percent className="size-4 text-orange-400" />
           </div>
-          <div className="text-2xl font-semibold text-zinc-100 tabular-nums">
-            {formatPct(analytics.avgRealMargin, 1)}
+          <div className="text-2xl font-semibold text-orange-400 tabular-nums">
+            {formatBRL(analytics.totalDeliveryDriver)}
           </div>
           <div className="flex items-center justify-between text-xs text-zinc-500 pt-1 border-t border-white/[0.05]">
-            <span>Meta padrão</span>
+            <span>Margem média cardápio</span>
             <span className="tabular-nums text-zinc-300 font-medium">
-              {formatPct(state.settings.defaultTargetMarginPct, 0)}
+              {formatPct(analytics.avgRealMargin, 1)}
             </span>
           </div>
         </div>
 
         <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-4 space-y-2">
           <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>Compras (Notas Fiscais)</span>
+            <span>Quitação de Custos Fixos</span>
             <ShoppingBag className="size-4 text-zinc-500" />
           </div>
           <div className="text-2xl font-semibold text-zinc-100 tabular-nums">
-            {formatBRL(analytics.totalPurchases)}
+            {formatBRL(Math.min(analytics.totalMonthFixedAccumulated, analytics.totalFixedCosts))}
+            <span className="text-xs font-normal text-zinc-400">
+              {' '}
+              / {formatBRL(analytics.totalFixedCosts)}
+            </span>
           </div>
           <div className="flex items-center justify-between text-xs text-zinc-500 pt-1 border-t border-white/[0.05]">
-            <span>Custos fixos (mensal)</span>
-            <span className="tabular-nums text-zinc-300 font-medium">
-              {formatBRL(analytics.totalFixedCosts)}
+            <span>Status das contas do mês</span>
+            <span
+              className={`tabular-nums font-medium ${
+                analytics.isFixedCostFullyPaid ? 'text-emerald-400' : 'text-amber-300'
+              }`}
+            >
+              {analytics.isFixedCostFullyPaid
+                ? '100% Quitado (Sobra = Lucro)'
+                : `Faltam ${formatBRL(analytics.missingToPayFixedCosts)}`}
             </span>
           </div>
         </div>
@@ -415,32 +462,130 @@ export default function OverviewTab({ state, onNavigate }: Props) {
           </div>
 
           <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-3">
-            <h2 className="text-sm font-semibold text-zinc-100">
-              Provisões sobre as Vendas do Período
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-zinc-100">
+                Provisões sobre as Vendas do Período
+              </h2>
+              <span className="text-[11px] text-zinc-400 tabular-nums">
+                Receita: {formatBRL(analytics.grossRevenue)}
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              Quanto separar de cada venda do período para pagar cada conta do negócio:
+            </p>
             <div className="divide-y divide-white/[0.06] text-xs">
               <div className="py-2 flex items-center justify-between">
-                <span className="text-zinc-400">Reposição de Estoque (CMV)</span>
+                <span className="text-zinc-400">1. Reposição de Estoque (CMV)</span>
                 <span className="tabular-nums font-medium text-zinc-200">
-                  {formatBRL(analytics.totalSalesCmv)}
+                  {formatBRL(analytics.totalSalesCmv)}{' '}
+                  <span className="text-zinc-500 font-normal">
+                    (
+                    {formatPct(
+                      analytics.grossRevenue > 0
+                        ? analytics.totalSalesCmv / analytics.grossRevenue
+                        : 0,
+                      1
+                    )}
+                    )
+                  </span>
                 </span>
               </div>
               <div className="py-2 flex items-center justify-between">
-                <span className="text-zinc-400">Reserva de Impostos (MEI)</span>
+                <span className="text-zinc-400">2. Reserva de Impostos (MEI)</span>
                 <span className="tabular-nums font-medium text-zinc-200">
-                  {formatBRL(analytics.totalTax)}
+                  {formatBRL(analytics.totalTax)}{' '}
+                  <span className="text-zinc-500 font-normal">
+                    (
+                    {formatPct(
+                      analytics.grossRevenue > 0
+                        ? analytics.totalTax / analytics.grossRevenue
+                        : 0,
+                      1
+                    )}
+                    )
+                  </span>
                 </span>
               </div>
               <div className="py-2 flex items-center justify-between">
-                <span className="text-zinc-400">Taxas da Maquininha</span>
-                <span className="tabular-nums font-medium text-zinc-200">
-                  {formatBRL(analytics.totalFees)}
+                <span className="text-orange-300 font-medium">3. Taxas do Entregador</span>
+                <span className="tabular-nums font-semibold text-orange-400">
+                  {formatBRL(analytics.totalDeliveryDriver)}{' '}
+                  <span className="text-zinc-500 font-normal">
+                    (
+                    {formatPct(
+                      analytics.grossRevenue > 0
+                        ? analytics.totalDeliveryDriver / analytics.grossRevenue
+                        : 0,
+                      1
+                    )}
+                    )
+                  </span>
                 </span>
+              </div>
+              {analytics.totalCardMachineFee > 0 && (
+                <div className="py-2 flex items-center justify-between">
+                  <span className="text-zinc-400">Taxas da Maquininha (Cartão)</span>
+                  <span className="tabular-nums font-medium text-zinc-200">
+                    {formatBRL(analytics.totalCardMachineFee)}
+                  </span>
+                </div>
+              )}
+              <div className="py-2 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">4. Custos Fixos (Rateio de Contas)</span>
+                  <span className="tabular-nums font-medium text-zinc-200">
+                    {formatBRL(analytics.effectiveFixedCost)}{' '}
+                    <span className="text-zinc-500 font-normal">
+                      (
+                      {formatPct(
+                        analytics.grossRevenue > 0
+                          ? analytics.effectiveFixedCost / analytics.grossRevenue
+                          : 0,
+                        1
+                      )}
+                      )
+                    </span>
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-[#18181c] rounded-full overflow-hidden">
+                  <div
+                    style={{ width: `${Math.min(100, analytics.fixedCostCoveragePct * 100)}%` }}
+                    className={`h-full rounded-full ${
+                      analytics.isFixedCostFullyPaid ? 'bg-emerald-500' : 'bg-amber-400'
+                    }`}
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-500 flex items-center justify-between">
+                  <span>
+                    Meta mensal: {formatBRL(Math.min(analytics.totalMonthFixedAccumulated, analytics.totalFixedCosts))} / {formatBRL(analytics.totalFixedCosts)}
+                  </span>
+                  <span className="tabular-nums">
+                    {formatPct(analytics.fixedCostCoveragePct, 0)} quitado
+                  </span>
+                </p>
+                {analytics.fixedCostOverflowToProfit > 0 && (
+                  <div className="mt-1 px-2.5 py-1.5 rounded-[6px] bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-[11px] text-emerald-300">
+                    <span>↳ Sobra de Custo Fixo (Contas Pagas → Lucro)</span>
+                    <span className="font-semibold tabular-nums">
+                      +{formatBRL(analytics.fixedCostOverflowToProfit)}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="pt-2.5 flex items-center justify-between font-semibold text-emerald-400">
-                <span>Lucro Líquido do Período</span>
-                <span className="tabular-nums">
-                  {formatBRL(analytics.netOperatingProfit)}
+                <span>5. Lucro Líquido do Período</span>
+                <span className="tabular-nums text-sm">
+                  {formatBRL(analytics.netOperatingProfit)}{' '}
+                  <span className="text-xs font-normal text-emerald-300/80">
+                    (
+                    {formatPct(
+                      analytics.grossRevenue > 0
+                        ? analytics.netOperatingProfit / analytics.grossRevenue
+                        : 0,
+                      1
+                    )}
+                    )
+                  </span>
                 </span>
               </div>
             </div>
@@ -462,24 +607,39 @@ export default function OverviewTab({ state, onNavigate }: Props) {
             </button>
           </div>
           <div className="divide-y divide-white/[0.06] text-xs">
-            {analytics.recentOrders.slice(0, 8).map((ord) => (
-              <div key={ord.id} className="px-4 py-2.5 flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-zinc-200">
-                    #{ord.orderNumber} {ord.customerName}
-                  </span>
-                  <p className="text-[11px] text-zinc-500">
-                    {ord.items.map((i) => `${i.quantity}x ${i.productName.split('-')[0].trim()}`).join(', ')}
-                  </p>
-                </div>
-                <div className="text-right tabular-nums">
-                  <div className="font-medium text-zinc-200">{formatBRL(ord.totalAmount)}</div>
-                  <div className="text-[11px] text-emerald-400">
-                    Lucro: {formatBRL(ord.netProfit)}
+            {analytics.recentOrders.slice(0, 8).map((ord) => {
+              const fin = calculateOrderFinancials(
+                ord,
+                state.products,
+                state.ingredients,
+                state.settings
+              );
+              return (
+                <div key={ord.id} className="px-4 py-2.5 flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-zinc-200">
+                      #{ord.orderNumber} {ord.customerName}
+                    </span>
+                    <p className="text-[11px] text-zinc-500">
+                      {ord.items
+                        .map((i) => `${i.quantity}x ${i.productName.split('-')[0].trim()}`)
+                        .join(', ')}
+                    </p>
+                  </div>
+                  <div className="text-right tabular-nums">
+                    <div className="font-medium text-zinc-200">{formatBRL(ord.totalAmount)}</div>
+                    <div className="text-[11px] text-zinc-400">
+                      Entregador:{' '}
+                      <span className="text-orange-400">
+                        {formatBRL(fin.deliveryFeeReserveAmount)}
+                      </span>{' '}
+                      • Lucro:{' '}
+                      <span className="text-emerald-400">{formatBRL(fin.baseNetProfit)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

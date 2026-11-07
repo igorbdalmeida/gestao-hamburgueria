@@ -1,4 +1,10 @@
-import { Ingredient, Product } from './types';
+import {
+  FixedCostItem,
+  Ingredient,
+  PaymentFeeConfig,
+  Product,
+  SaleOrder,
+} from './types';
 
 export interface ProductCostBreakdown {
   foodCost: number;
@@ -99,6 +105,196 @@ export function calculateProductMetrics(
     realMarginPct,
     markupDivisor,
     itemsDetailed,
+  };
+}
+
+export interface OrderFinancialBreakdown {
+  totalAmount: number;
+  totalCmv: number;
+  taxReserveAmount: number;
+  deliveryFeeReserveAmount: number;
+  cardMachineFeeAmount: number;
+  fixedCostAllocationAmount: number;
+  baseNetProfit: number;
+}
+
+export function calculateOrderFinancials(
+  order: Pick<
+    SaleOrder,
+    'items' | 'subtotal' | 'deliveryFee' | 'totalAmount' | 'totalCmv' | 'paymentMethod'
+  >,
+  products: Product[],
+  ingredients: Ingredient[],
+  settings: PaymentFeeConfig
+): OrderFinancialBreakdown {
+  const prodMap = new Map(products.map((p) => [p.id, p]));
+  let itemsCmv = 0;
+  let taxReserveAmount = 0;
+  let deliveryFeeReserveAmount = 0;
+  let fixedCostAllocationAmount = 0;
+
+  for (const item of order.items) {
+    const product = prodMap.get(item.productId);
+    const qty = Number(item.quantity) || 0;
+    const itemRev = (Number(item.unitPrice) || 0) * qty;
+
+    const unitCmv =
+      item.unitCmv !== undefined && item.unitCmv > 0
+        ? item.unitCmv
+        : product
+        ? calculateProductMetrics(product, ingredients).totalCmv
+        : 0;
+    itemsCmv += unitCmv * qty;
+
+    const taxPct = product ? product.taxPct : settings.estimatedTaxPct;
+    const deliveryFeePct = product ? product.channelFeePct : settings.defaultChannelFeePct;
+    const fixedPct = product ? product.fixedCostPct : settings.defaultFixedCostPct;
+
+    taxReserveAmount += itemRev * taxPct;
+    deliveryFeeReserveAmount += itemRev * deliveryFeePct;
+    fixedCostAllocationAmount += itemRev * fixedPct;
+  }
+
+  // Se houver taxa de entrega avulsa cobrada no pedido, ela também compõe a verba do entregador
+  if ((order.deliveryFee || 0) > 0) {
+    deliveryFeeReserveAmount += order.deliveryFee;
+  }
+
+  let cardFeePct = 0;
+  if (
+    order.paymentMethod === 'PIX' ||
+    order.paymentMethod === 'PIX (Mercado Pago / Chave)'
+  ) {
+    cardFeePct = settings.pixFeePct || 0;
+  } else if (
+    order.paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
+    order.paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)'
+  ) {
+    cardFeePct = settings.creditCardFeePct || 0;
+  } else if (order.paymentMethod === 'Cartão de Débito (Na Entrega)') {
+    cardFeePct = settings.debitCardFeePct || 0;
+  }
+
+  const totalAmount = order.totalAmount || order.subtotal || 0;
+  const cardMachineFeeAmount = totalAmount * cardFeePct;
+  const totalCmv = itemsCmv > 0 ? itemsCmv : order.totalCmv || 0;
+
+  const baseNetProfit =
+    totalAmount -
+    totalCmv -
+    taxReserveAmount -
+    deliveryFeeReserveAmount -
+    cardMachineFeeAmount -
+    fixedCostAllocationAmount;
+
+  return {
+    totalAmount,
+    totalCmv,
+    taxReserveAmount,
+    deliveryFeeReserveAmount,
+    cardMachineFeeAmount,
+    fixedCostAllocationAmount,
+    baseNetProfit,
+  };
+}
+
+export interface PeriodFinancialSummary {
+  grossRevenue: number;
+  totalSalesCmv: number;
+  totalTaxReserve: number;
+  totalDeliveryDriverReserve: number;
+  totalCardMachineFee: number;
+  rawFixedCostReserve: number;
+  effectiveFixedCost: number;
+  fixedCostOverflowToProfit: number;
+  baseNetProfit: number;
+  realNetProfit: number;
+  totalMonthlyFixedTarget: number;
+  totalMonthFixedAccumulated: number;
+  fixedCostCoveragePct: number;
+  isFixedCostFullyPaid: boolean;
+  missingToPayFixedCosts: number;
+}
+
+export function calculatePeriodFinancialSummary(
+  periodOrders: SaleOrder[],
+  products: Product[],
+  ingredients: Ingredient[],
+  fixedCosts: FixedCostItem[],
+  settings: PaymentFeeConfig,
+  priorFixedCostAccumulated = 0
+): PeriodFinancialSummary {
+  const validOrders = periodOrders.filter((o) => o.status !== 'Cancelado');
+
+  let grossRevenue = 0;
+  let totalSalesCmv = 0;
+  let totalTaxReserve = 0;
+  let totalDeliveryDriverReserve = 0;
+  let totalCardMachineFee = 0;
+  let rawFixedCostReserve = 0;
+  let baseNetProfit = 0;
+
+  for (const ord of validOrders) {
+    const fin = calculateOrderFinancials(ord, products, ingredients, settings);
+    grossRevenue += fin.totalAmount;
+    totalSalesCmv += fin.totalCmv;
+    totalTaxReserve += fin.taxReserveAmount;
+    totalDeliveryDriverReserve += fin.deliveryFeeReserveAmount;
+    totalCardMachineFee += fin.cardMachineFeeAmount;
+    rawFixedCostReserve += fin.fixedCostAllocationAmount;
+    baseNetProfit += fin.baseNetProfit;
+  }
+
+  const totalMonthlyFixedTarget = fixedCosts.reduce(
+    (acc, fc) => acc + (Number(fc.monthlyAmount) || 0),
+    0
+  );
+
+  const remainingTargetBeforePeriod = Math.max(
+    0,
+    totalMonthlyFixedTarget - priorFixedCostAccumulated
+  );
+
+  const effectiveFixedCost =
+    totalMonthlyFixedTarget > 0
+      ? Math.min(rawFixedCostReserve, remainingTargetBeforePeriod)
+      : rawFixedCostReserve;
+
+  const fixedCostOverflowToProfit =
+    totalMonthlyFixedTarget > 0
+      ? Math.max(0, rawFixedCostReserve - remainingTargetBeforePeriod)
+      : 0;
+
+  const realNetProfit = baseNetProfit + fixedCostOverflowToProfit;
+
+  const totalMonthFixedAccumulated = priorFixedCostAccumulated + rawFixedCostReserve;
+  const fixedCostCoveragePct =
+    totalMonthlyFixedTarget > 0
+      ? Math.min(1, totalMonthFixedAccumulated / totalMonthlyFixedTarget)
+      : 1;
+  const isFixedCostFullyPaid =
+    totalMonthlyFixedTarget > 0 && totalMonthFixedAccumulated >= totalMonthlyFixedTarget;
+  const missingToPayFixedCosts = Math.max(
+    0,
+    totalMonthlyFixedTarget - totalMonthFixedAccumulated
+  );
+
+  return {
+    grossRevenue,
+    totalSalesCmv,
+    totalTaxReserve,
+    totalDeliveryDriverReserve,
+    totalCardMachineFee,
+    rawFixedCostReserve,
+    effectiveFixedCost,
+    fixedCostOverflowToProfit,
+    baseNetProfit,
+    realNetProfit,
+    totalMonthlyFixedTarget,
+    totalMonthFixedAccumulated,
+    fixedCostCoveragePct,
+    isFixedCostFullyPaid,
+    missingToPayFixedCosts,
   };
 }
 

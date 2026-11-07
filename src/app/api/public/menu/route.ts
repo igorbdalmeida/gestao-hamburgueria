@@ -1,5 +1,9 @@
 import { checkRateLimit, getClientIp, loadAppState, saveAppState } from '@/lib/db';
-import { calculateProductMetrics, normalizePhone } from '@/lib/pricing';
+import {
+  calculateOrderFinancials,
+  calculateProductMetrics,
+  normalizePhone,
+} from '@/lib/pricing';
 import {
   CUSTOMER_COOKIE_NAME,
   CUSTOMER_SESSION_MAX_AGE,
@@ -189,23 +193,24 @@ export async function POST(request: Request) {
     const deliveryFee = state.settings.deliveryFeeDefault || 0;
     const totalAmount = subtotal + deliveryFee;
 
-    let feePct = 0;
-    if (paymentMethod === 'PIX' || paymentMethod === 'PIX (Mercado Pago / Chave)') {
-      feePct = state.settings.pixFeePct;
-    } else if (
-      paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
-      paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)'
-    ) {
-      feePct = state.settings.creditCardFeePct;
-    } else if (paymentMethod === 'Cartão de Débito (Na Entrega)') {
-      feePct = state.settings.debitCardFeePct;
-    }
+    const fin = calculateOrderFinancials(
+      {
+        items: orderItems,
+        subtotal,
+        deliveryFee,
+        totalAmount,
+        totalCmv,
+        paymentMethod,
+      },
+      state.products,
+      state.ingredients,
+      state.settings
+    );
 
-    const paymentFeeAmount = totalAmount * feePct;
-    const taxReserveAmount = totalAmount * state.settings.estimatedTaxPct;
-    const fixedCostAllocationAmount = totalAmount * state.settings.defaultFixedCostPct;
-    const netProfit =
-      totalAmount - totalCmv - paymentFeeAmount - taxReserveAmount - fixedCostAllocationAmount;
+    const paymentFeeAmount = fin.deliveryFeeReserveAmount + fin.cardMachineFeeAmount;
+    const taxReserveAmount = fin.taxReserveAmount;
+    const fixedCostAllocationAmount = fin.fixedCostAllocationAmount;
+    const netProfit = fin.baseNetProfit;
 
     const nextOrderNumber =
       state.orders.reduce((max, o) => Math.max(max, o.orderNumber || 100), 100) + 1;

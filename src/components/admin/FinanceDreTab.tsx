@@ -1,6 +1,11 @@
 'use client';
 
-import { calculateProductMetrics, formatBRL } from '@/lib/pricing';
+import {
+  calculatePeriodFinancialSummary,
+  calculateProductMetrics,
+  formatBRL,
+  formatPct,
+} from '@/lib/pricing';
 import { AppDatabaseState, FixedCostItem } from '@/lib/types';
 import {
   CheckCircle2,
@@ -23,6 +28,8 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
   const [costName, setCostName] = useState('');
   const [costCat, setCostCat] = useState<FixedCostItem['category']>('Utilidades');
   const [costAmount, setCostAmount] = useState('100.00');
+  const [simBurgersDay, setSimBurgersDay] = useState<number>(30);
+  const [simDaysMonth, setSimDaysMonth] = useState<number>(26);
 
   // Security password change state
   const [newPassword, setNewPassword] = useState('');
@@ -132,43 +139,118 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
     const totalInvoicesPurchases = state.invoices.reduce((a, b) => a + b.totalAmount, 0);
 
     const activeOrders = state.orders.filter((o) => o.status !== 'Cancelado');
-    const totalSalesRevenue = activeOrders.reduce((a, b) => a + b.totalAmount, 0);
-    const totalSalesCmv = activeOrders.reduce((a, b) => a + b.totalCmv, 0);
-    const totalSalesFees = activeOrders.reduce((a, b) => a + b.paymentFeeAmount, 0);
-    const totalSalesTaxReserve = activeOrders.reduce((a, b) => a + b.taxReserveAmount, 0);
+    const periodSummary = calculatePeriodFinancialSummary(
+      activeOrders,
+      state.products,
+      state.ingredients,
+      state.fixedCosts,
+      state.settings,
+      0
+    );
 
     const burgers = state.products.filter((p) => p.category === 'Hambúrgueres');
-    const avgBurgerContribution =
-      burgers.length > 0
-        ? burgers.reduce((acc, b) => {
+    const burgerList = burgers.length > 0 ? burgers : state.products;
+
+    const avgBurgerPrice =
+      burgerList.length > 0
+        ? burgerList.reduce((acc, b) => acc + b.practicedPrice, 0) / burgerList.length
+        : 22.7;
+
+    const avgBurgerCmv =
+      burgerList.length > 0
+        ? burgerList.reduce((acc, b) => {
             const m = calculateProductMetrics(b, state.ingredients);
-            const variableDeductions =
-              b.practicedPrice * (b.taxPct + b.channelFeePct);
-            return acc + (b.practicedPrice - m.totalCmv - variableDeductions);
-          }, 0) / burgers.length
-        : 12;
+            return acc + m.totalCmv;
+          }, 0) / burgerList.length
+        : 7.9;
 
-    const breakEvenBurgersMonth =
-      avgBurgerContribution > 0 ? Math.ceil(totalMonthlyFixed / avgBurgerContribution) : 0;
-    const breakEvenBurgersDay = Math.ceil(breakEvenBurgersMonth / 30);
+    const avgBurgerFixedAllocation =
+      burgerList.length > 0
+        ? burgerList.reduce((acc, b) => acc + b.practicedPrice * b.fixedCostPct, 0) /
+          burgerList.length
+        : 3.4;
 
-    const grossProfitAfterCmvAndFees =
-      totalSalesRevenue - totalSalesCmv - totalSalesFees - totalSalesTaxReserve;
+    const avgBurgerDeliveryAllocation =
+      burgerList.length > 0
+        ? burgerList.reduce((acc, b) => acc + b.practicedPrice * b.channelFeePct, 0) /
+          burgerList.length
+        : 2.27;
+
+    const avgBurgerTaxAllocation =
+      burgerList.length > 0
+        ? burgerList.reduce((acc, b) => acc + b.practicedPrice * b.taxPct, 0) /
+          burgerList.length
+        : 0.57;
+
+    const avgBurgerBaseProfit =
+      avgBurgerPrice -
+      avgBurgerCmv -
+      avgBurgerFixedAllocation -
+      avgBurgerDeliveryAllocation -
+      avgBurgerTaxAllocation;
+
+    // Quantos lanches são necessários para a provisão de Custos Fixos (15%) quitar 100% das Despesas Fixas Mensais
+    const burgersToPayFixedCosts =
+      avgBurgerFixedAllocation > 0
+        ? Math.ceil(totalMonthlyFixed / avgBurgerFixedAllocation)
+        : 0;
+    const daysToPayFixedAtSim =
+      simBurgersDay > 0 ? Math.ceil(burgersToPayFixedCosts / simBurgersDay) : 0;
+    const remainingBurgersForMissingFixed =
+      avgBurgerFixedAllocation > 0
+        ? Math.ceil(periodSummary.missingToPayFixedCosts / avgBurgerFixedAllocation)
+        : 0;
+
+    // Simulação para simBurgersDay x simDaysMonth
+    const simTotalBurgersMonth = simBurgersDay * simDaysMonth;
+    const simDailyRevenue = simBurgersDay * avgBurgerPrice;
+    const simMonthlyRevenue = simTotalBurgersMonth * avgBurgerPrice;
+    const simDailyCmv = simBurgersDay * avgBurgerCmv;
+    const simMonthlyCmv = simTotalBurgersMonth * avgBurgerCmv;
+    const simDailyDelivery = simBurgersDay * avgBurgerDeliveryAllocation;
+    const simMonthlyDelivery = simTotalBurgersMonth * avgBurgerDeliveryAllocation;
+    const simDailyTax = simBurgersDay * avgBurgerTaxAllocation;
+    const simMonthlyTax = simTotalBurgersMonth * avgBurgerTaxAllocation;
+    const simRawFixedGenerated = simTotalBurgersMonth * avgBurgerFixedAllocation;
+    const simFixedUsed = Math.min(simRawFixedGenerated, totalMonthlyFixed);
+    const simFixedOverflowToProfit = Math.max(0, simRawFixedGenerated - totalMonthlyFixed);
+    const simBaseNetProfit = simTotalBurgersMonth * avgBurgerBaseProfit;
+    const simRealNetProfit = simBaseNetProfit + simFixedOverflowToProfit;
+    const simDailyProfitBeforePayoff = simBurgersDay * avgBurgerBaseProfit;
+    const simDailyProfitAfterPayoff =
+      simBurgersDay * (avgBurgerBaseProfit + avgBurgerFixedAllocation);
 
     return {
       totalMonthlyFixed,
       totalPaidFixed,
       totalInvoicesPurchases,
-      totalSalesRevenue,
-      totalSalesCmv,
-      totalSalesFees,
-      totalSalesTaxReserve,
-      grossProfitAfterCmvAndFees,
-      avgBurgerContribution,
-      breakEvenBurgersMonth,
-      breakEvenBurgersDay,
+      periodSummary,
+      avgBurgerPrice,
+      avgBurgerCmv,
+      avgBurgerFixedAllocation,
+      avgBurgerDeliveryAllocation,
+      avgBurgerBaseProfit,
+      burgersToPayFixedCosts,
+      daysToPayFixedAtSim,
+      remainingBurgersForMissingFixed,
+      simTotalBurgersMonth,
+      simDailyRevenue,
+      simMonthlyRevenue,
+      simDailyCmv,
+      simMonthlyCmv,
+      simDailyDelivery,
+      simMonthlyDelivery,
+      simDailyTax,
+      simMonthlyTax,
+      simRawFixedGenerated,
+      simFixedUsed,
+      simFixedOverflowToProfit,
+      simBaseNetProfit,
+      simRealNetProfit,
+      simDailyProfitBeforePayoff,
+      simDailyProfitAfterPayoff,
     };
-  }, [state]);
+  }, [state, simBurgersDay, simDaysMonth]);
 
   return (
     <div className="space-y-6">
@@ -179,7 +261,7 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
             Custos Fixos, DRE & Segurança
           </h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Ponto de equilíbrio operacional, despesas recorrentes, parâmetros do delivery e proteção do painel.
+            Quitação das despesas fixas mensais, conversão da sobra em lucro líquido e estudo de produção diária.
           </p>
         </div>
 
@@ -203,36 +285,177 @@ export default function FinanceDreTab({ state, onUpdateState }: Props) {
         </div>
       </div>
 
-      {/* Break-Even & Financial Cards */}
+      {/* Top 3 Cards: Quitação dos Custos Fixos & Sobra para Lucro */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 tabular-nums">
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-1.5">
-          <p className="text-xs text-zinc-400 font-medium">Ponto de Equilíbrio Operacional</p>
+        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-2">
+          <p className="text-xs text-zinc-400 font-medium">
+            Meta p/ Quitar Custos Fixos ({formatBRL(summary.totalMonthlyFixed)}/mês)
+          </p>
           <p className="text-2xl font-semibold text-zinc-100">
-            {summary.breakEvenBurgersMonth} un / mês
+            {summary.burgersToPayFixedCosts} lanches / mês
           </p>
           <p className="text-xs text-zinc-400">
-            Média de <strong className="text-zinc-200">~{summary.breakEvenBurgersDay} lanches/dia</strong> para cobrir custos fixos ({formatBRL(summary.totalMonthlyFixed)}).
+            Cada lanche separa em média <strong className="text-zinc-200">{formatBRL(summary.avgBurgerFixedAllocation)} (15%)</strong>. Vendendo {simBurgersDay}/dia, você quita tudo em <strong className="text-emerald-400">{summary.daysToPayFixedAtSim} dias</strong>!
           </p>
         </div>
 
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-1.5">
-          <p className="text-xs text-zinc-400 font-medium">Margem Operacional de Vendas</p>
+        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-zinc-400 font-medium">
+              Acumulado nas Vendas p/ Custos Fixos
+            </p>
+            <span
+              className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                summary.periodSummary.isFixedCostFullyPaid
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+              }`}
+            >
+              {formatPct(summary.periodSummary.fixedCostCoveragePct, 0)} quitado
+            </span>
+          </div>
+          <p className="text-2xl font-semibold text-zinc-100">
+            {formatBRL(summary.periodSummary.effectiveFixedCost)}
+            <span className="text-sm font-normal text-zinc-500">
+              {' '}
+              / {formatBRL(summary.totalMonthlyFixed)}
+            </span>
+          </p>
+          <div className="w-full h-2 bg-[#18181c] rounded-full overflow-hidden">
+            <div
+              style={{
+                width: `${Math.min(100, summary.periodSummary.fixedCostCoveragePct * 100)}%`,
+              }}
+              className={`h-full rounded-full ${
+                summary.periodSummary.isFixedCostFullyPaid ? 'bg-emerald-500' : 'bg-amber-400'
+              }`}
+            />
+          </div>
+          <p className="text-xs text-zinc-400">
+            {summary.periodSummary.isFixedCostFullyPaid ? (
+              <span className="text-emerald-400 font-medium">
+                Contas fixas 100% pagas! +{formatBRL(summary.periodSummary.fixedCostOverflowToProfit)} de sobra já virou Lucro!
+              </span>
+            ) : (
+              <span>
+                Faltam <strong className="text-zinc-200">{formatBRL(summary.periodSummary.missingToPayFixedCosts)}</strong> (~{summary.remainingBurgersForMissingFixed} lanches) para o custo fixo virar sobra de lucro.
+              </span>
+            )}
+          </p>
+        </div>
+
+        <div className="bg-[#121215] border border-emerald-500/25 rounded-[10px] p-5 space-y-2">
+          <p className="text-xs text-emerald-400 font-medium">
+            Lucro Líquido Real Acumulado (c/ Sobra)
+          </p>
           <p className="text-2xl font-semibold text-emerald-400">
-            {formatBRL(summary.grossProfitAfterCmvAndFees)}
+            {formatBRL(summary.periodSummary.realNetProfit)}
           </p>
           <p className="text-xs text-zinc-400">
-            Receita ({formatBRL(summary.totalSalesRevenue)}) deduzindo insumos ({formatBRL(summary.totalSalesCmv)}) e taxas.
+            Verba do Entregador acumulada:{' '}
+            <strong className="text-orange-400">
+              {formatBRL(summary.periodSummary.totalDeliveryDriverReserve)}
+            </strong>{' '}
+            • Estoque (CMV): {formatBRL(summary.periodSummary.totalSalesCmv)}
           </p>
         </div>
+      </div>
 
-        <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-1.5">
-          <p className="text-xs text-zinc-400 font-medium">Compras de Estoque Acumuladas</p>
-          <p className="text-2xl font-semibold text-zinc-100">
-            {formatBRL(summary.totalInvoicesPurchases)}
-          </p>
-          <p className="text-xs text-zinc-400">
-            Total de notas fiscais de reposição registradas no período.
-          </p>
+      {/* Painel de Estudo & Simulação: Volume Diário, Entregador e Sobra dos Custos Fixos */}
+      <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100">
+              Simulador de Viabilidade: Volume Diário, Diária do Entregador & Sobra de Custos Fixos
+            </h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Veja exatamente como os custos fixos ({formatBRL(summary.totalMonthlyFixed)}/mês) são quitados e quanto sobra de lucro líquido trabalhando com sua meta diária.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <label className="flex items-center gap-2 bg-[#18181c] border border-white/[0.08] rounded-[6px] px-3 py-1.5 text-zinc-300">
+              <span>Lanches por dia:</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={simBurgersDay}
+                onChange={(e) => setSimBurgersDay(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-14 bg-[#09090b] border border-white/[0.12] rounded px-1.5 py-0.5 text-center text-zinc-100 font-semibold tabular-nums"
+              />
+            </label>
+            <label className="flex items-center gap-2 bg-[#18181c] border border-white/[0.08] rounded-[6px] px-3 py-1.5 text-zinc-300">
+              <span>Dias no mês:</span>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={simDaysMonth}
+                onChange={(e) =>
+                  setSimDaysMonth(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))
+                }
+                className="w-14 bg-[#09090b] border border-white/[0.12] rounded px-1.5 py-0.5 text-center text-zinc-100 font-semibold tabular-nums"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs tabular-nums">
+          <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3.5 space-y-1">
+            <span className="text-zinc-400">1. Faturamento Estimado</span>
+            <p className="text-base font-semibold text-zinc-100">
+              {formatBRL(summary.simDailyRevenue)}/dia
+            </p>
+            <p className="text-[11px] text-zinc-400">
+              No mês ({summary.simTotalBurgersMonth} un):{' '}
+              <strong className="text-zinc-200">{formatBRL(summary.simMonthlyRevenue)}</strong>
+            </p>
+          </div>
+
+          <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3.5 space-y-1">
+            <span className="text-zinc-400">2. Reposição Estoque (CMV)</span>
+            <p className="text-base font-semibold text-rose-400">
+              {formatBRL(summary.simDailyCmv)}/dia
+            </p>
+            <p className="text-[11px] text-zinc-400">
+              No mês: <strong className="text-zinc-200">{formatBRL(summary.simMonthlyCmv)}</strong>
+            </p>
+          </div>
+
+          <div className="bg-[#18181c] border border-orange-500/25 rounded-[8px] p-3.5 space-y-1">
+            <span className="text-orange-300 font-medium">3. Verba do Entregador</span>
+            <p className="text-base font-semibold text-orange-400">
+              {formatBRL(summary.simDailyDelivery)}/dia
+            </p>
+            <p className="text-[11px] text-zinc-400">
+              No mês: <strong className="text-orange-300">{formatBRL(summary.simMonthlyDelivery)}</strong> ({formatBRL(summary.avgBurgerDeliveryAllocation)}/un)
+            </p>
+          </div>
+
+          <div className="bg-[#18181c] border border-amber-500/25 rounded-[8px] p-3.5 space-y-1">
+            <span className="text-amber-300 font-medium">4. Custos Fixos & Sobra</span>
+            <p className="text-base font-semibold text-zinc-100">
+              Quitado no {summary.daysToPayFixedAtSim}º dia!
+            </p>
+            <p className="text-[11px] text-emerald-400 font-medium">
+              Sobra que vira Lucro: +{formatBRL(summary.simFixedOverflowToProfit)}/mês
+            </p>
+          </div>
+
+          <div className="bg-[#18181c] border border-emerald-500/30 rounded-[8px] p-3.5 space-y-1">
+            <span className="text-emerald-400 font-medium">5. Lucro Líquido no Bolso</span>
+            <p className="text-base font-semibold text-emerald-400">
+              {formatBRL(summary.simRealNetProfit)}/mês
+            </p>
+            <p className="text-[11px] text-zinc-300">
+              {formatBRL(summary.simDailyProfitBeforePayoff)}/dia → sobe p/{' '}
+              <strong className="text-emerald-400">
+                {formatBRL(summary.simDailyProfitAfterPayoff)}/dia
+              </strong>{' '}
+              após {summary.daysToPayFixedAtSim}º dia
+            </p>
+          </div>
         </div>
       </div>
 

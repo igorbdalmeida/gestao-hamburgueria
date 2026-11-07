@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  calculateOrderFinancials,
   calculateProductMetrics,
   formatBRL,
   formatPhoneBR,
@@ -78,32 +79,28 @@ export default function SalesTab({ state, onUpdateState }: Props) {
       totalCmv += m.totalCmv * qty;
     }
 
-    let feePct = 0;
-    if (paymentMethod === 'PIX' || paymentMethod === 'PIX (Mercado Pago / Chave)') {
-      feePct = state.settings.pixFeePct;
-    } else if (
-      paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
-      paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)'
-    ) {
-      feePct = state.settings.creditCardFeePct;
-    } else if (paymentMethod === 'Cartão de Débito (Na Entrega)') {
-      feePct = state.settings.debitCardFeePct;
-    }
-
-    const paymentFeeAmount = subtotal * feePct;
-    const taxReserveAmount = subtotal * state.settings.estimatedTaxPct;
-    const fixedCostAllocationAmount = subtotal * state.settings.defaultFixedCostPct;
-    const netProfit =
-      subtotal - totalCmv - paymentFeeAmount - taxReserveAmount - fixedCostAllocationAmount;
+    const fin = calculateOrderFinancials(
+      {
+        items,
+        subtotal,
+        deliveryFee: 0,
+        totalAmount: subtotal,
+        totalCmv,
+        paymentMethod,
+      },
+      state.products,
+      state.ingredients,
+      state.settings
+    );
 
     return {
       items,
       subtotal,
-      totalCmv,
-      paymentFeeAmount,
-      taxReserveAmount,
-      fixedCostAllocationAmount,
-      netProfit,
+      totalCmv: fin.totalCmv,
+      paymentFeeAmount: fin.deliveryFeeReserveAmount + fin.cardMachineFeeAmount,
+      taxReserveAmount: fin.taxReserveAmount,
+      fixedCostAllocationAmount: fin.fixedCostAllocationAmount,
+      netProfit: fin.baseNetProfit,
     };
   }, [posCart, state.products, state.ingredients, paymentMethod, state.settings]);
 

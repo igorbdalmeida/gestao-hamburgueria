@@ -23,6 +23,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
   const [simPaymentMode, setSimPaymentMode] = useState<
     'padrao' | 'pix' | 'debito_infinite' | 'credito_infinite'
   >('padrao');
+  const [targetDailyBurgers, setTargetDailyBurgers] = useState<number>(30);
 
   const rows = useMemo(() => {
     return state.products.map((product) => {
@@ -30,6 +31,54 @@ export default function PricingTab({ state, onUpdateState }: Props) {
       return { product, metrics };
     });
   }, [state.products, state.ingredients]);
+
+  const burgerPlanner = useMemo(() => {
+    const burgerRows = rows.filter((r) => r.product.category === 'Hambúrgueres');
+    const list = burgerRows.length > 0 ? burgerRows : rows;
+    if (list.length === 0) return null;
+    const count = list.length;
+    const avgPrice = list.reduce((a, r) => a + r.product.practicedPrice, 0) / count;
+    const avgDeliveryPct = list.reduce((a, r) => a + r.product.channelFeePct, 0) / count;
+    const avgDeliveryPerBurger =
+      list.reduce((a, r) => a + r.metrics.channelFeeAmount, 0) / count;
+    const avgProfitPerBurger = list.reduce((a, r) => a + r.metrics.netProfit, 0) / count;
+    const avgFixedPerBurger =
+      list.reduce((a, r) => a + r.metrics.fixedCostAmount, 0) / count;
+
+    const dailyRevenue = avgPrice * targetDailyBurgers;
+    const dailyDeliveryPool = avgDeliveryPerBurger * targetDailyBurgers;
+    const dailyNetProfit = avgProfitPerBurger * targetDailyBurgers;
+    const dailyFixedPool = avgFixedPerBurger * targetDailyBurgers;
+
+    // Percentual sugerido para juntar R$ 35/dia (média entre R$ 30 e R$ 40)
+    const pctFor30 = dailyRevenue > 0 ? 30 / dailyRevenue : 0;
+    const pctFor35 = dailyRevenue > 0 ? 35 / dailyRevenue : 0;
+    const pctFor40 = dailyRevenue > 0 ? 40 / dailyRevenue : 0;
+
+    return {
+      avgPrice,
+      avgDeliveryPct,
+      avgDeliveryPerBurger,
+      avgProfitPerBurger,
+      dailyRevenue,
+      dailyDeliveryPool,
+      dailyNetProfit,
+      dailyFixedPool,
+      pctFor30,
+      pctFor35,
+      pctFor40,
+    };
+  }, [rows, targetDailyBurgers]);
+
+  function applyDeliveryPctToBurgers(pctDecimal: number) {
+    const cleanPct = Number(pctDecimal.toFixed(4));
+    onUpdateState((prev) => ({
+      ...prev,
+      products: prev.products.map((p) =>
+        p.category === 'Hambúrgueres' ? { ...p, channelFeePct: cleanPct } : p
+      ),
+    }));
+  }
 
   const averages = useMemo(() => {
     if (rows.length === 0) return null;
@@ -62,15 +111,24 @@ export default function PricingTab({ state, onUpdateState }: Props) {
 
   const simResult = useMemo(() => {
     if (!selectedProduct) return null;
-    let channelFee = selectedProduct.channelFeePct;
-    if (simPaymentMode === 'pix') channelFee = state.settings.pixFeePct;
-    else if (simPaymentMode === 'debito_infinite') channelFee = state.settings.debitCardFeePct;
-    else if (simPaymentMode === 'credito_infinite') channelFee = state.settings.creditCardFeePct;
+    const base = calculateProductMetrics(selectedProduct, state.ingredients);
+    let cardFeePct = 0;
+    if (simPaymentMode === 'pix') cardFeePct = state.settings.pixFeePct;
+    else if (simPaymentMode === 'debito_infinite') cardFeePct = state.settings.debitCardFeePct;
+    else if (simPaymentMode === 'credito_infinite') cardFeePct = state.settings.creditCardFeePct;
 
-    return calculateProductMetrics(
-      { ...selectedProduct, channelFeePct: channelFee },
-      state.ingredients
-    );
+    const cardFeeAmount = base.practicedPrice * cardFeePct;
+    const netProfitAfterCard = base.netProfit - cardFeeAmount;
+    const realMarginAfterCard =
+      base.practicedPrice > 0 ? netProfitAfterCard / base.practicedPrice : 0;
+
+    return {
+      ...base,
+      cardFeePct,
+      cardFeeAmount,
+      netProfit: netProfitAfterCard,
+      realMarginPct: realMarginAfterCard,
+    };
   }, [selectedProduct, simPaymentMode, state.ingredients, state.settings]);
 
   return (
@@ -80,13 +138,114 @@ export default function PricingTab({ state, onUpdateState }: Props) {
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Precificação e Margem</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Cálculo por Markup Divisor conectado em tempo real às fichas técnicas.
+            Cálculo por Markup Divisor conectado às fichas técnicas e à provisão do entregador.
           </p>
         </div>
         <div className="text-xs text-zinc-400 bg-[#121215] border border-white/[0.08] rounded-[6px] px-3 py-1.5 tabular-nums">
-          Fórmula: CMV ÷ [1 - (Fixos + Impostos + Taxa + Margem Alvo)]
+          Fórmula: CMV ÷ [1 - (Fixos + Impostos + Taxa Entrega + Margem Alvo)]
         </div>
       </div>
+
+      {/* Planejador Rápido: Meta Diária de Lanches & Diária do Entregador */}
+      {burgerPlanner && (
+        <div className="bg-[#121215] border border-orange-500/25 rounded-[10px] p-4 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-orange-400">
+                Planejador de Produção & Verba Diária do Entregador
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Simule quantos lanches pretende vender por dia para calibrar a <strong className="text-zinc-200">Taxa Entrega (%)</strong> e garantir os R$ 30 a R$ 40 diários do entregador.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="text-zinc-300 font-medium flex items-center gap-1.5 bg-[#18181c] border border-white/[0.08] rounded-[6px] px-2.5 py-1.5">
+                <span>Meta diária:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={targetDailyBurgers}
+                  onChange={(e) =>
+                    setTargetDailyBurgers(Math.max(1, parseInt(e.target.value, 10) || 1))
+                  }
+                  className="w-14 bg-[#09090b] border border-white/[0.12] rounded px-1.5 py-0.5 text-center text-zinc-100 font-semibold tabular-nums"
+                />
+                <span>lanches/dia</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => applyDeliveryPctToBurgers(burgerPlanner.pctFor35)}
+                className="px-2.5 py-1.5 rounded-[6px] bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 border border-orange-500/30 font-medium transition"
+                title="Ajusta a Taxa de Entrega de todos os hambúrgueres para gerar R$ 35/dia nesta meta"
+              >
+                Calibrar p/ R$ 35/dia ({formatPct(burgerPlanner.pctFor35, 1)})
+              </button>
+              <button
+                type="button"
+                onClick={() => applyDeliveryPctToBurgers(burgerPlanner.pctFor40)}
+                className="px-2.5 py-1.5 rounded-[6px] bg-[#18181c] hover:bg-zinc-800 text-zinc-200 border border-white/[0.08] font-medium transition"
+                title="Ajusta a Taxa de Entrega de todos os hambúrgueres para gerar R$ 40/dia nesta meta"
+              >
+                Calibrar p/ R$ 40/dia ({formatPct(burgerPlanner.pctFor40, 1)})
+              </button>
+              <button
+                type="button"
+                onClick={() => applyDeliveryPctToBurgers(0.1)}
+                className="px-2.5 py-1.5 rounded-[6px] bg-[#18181c] hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] transition"
+              >
+                Manter 10%
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs tabular-nums pt-1">
+            <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
+              <span className="text-zinc-400">Faturamento ({targetDailyBurgers} lanches/dia)</span>
+              <p className="text-base font-semibold text-zinc-100 mt-0.5">
+                {formatBRL(burgerPlanner.dailyRevenue)}/dia
+              </p>
+              <span className="text-[11px] text-zinc-500">
+                Ticket médio burger: {formatBRL(burgerPlanner.avgPrice)}
+              </span>
+            </div>
+
+            <div className="bg-[#18181c] border border-orange-500/25 rounded-[8px] p-3">
+              <span className="text-orange-300 font-medium">
+                Verba do Entregador ({formatPct(burgerPlanner.avgDeliveryPct, 1)})
+              </span>
+              <p className="text-base font-semibold text-orange-400 mt-0.5">
+                {formatBRL(burgerPlanner.dailyDeliveryPool)}/dia
+              </p>
+              <span className="text-[11px] text-zinc-400">
+                {formatBRL(burgerPlanner.avgDeliveryPerBurger)} reservado por lanche
+              </span>
+            </div>
+
+            <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
+              <span className="text-zinc-400">Provisão Custos Fixos (15%)</span>
+              <p className="text-base font-semibold text-zinc-200 mt-0.5">
+                {formatBRL(burgerPlanner.dailyFixedPool)}/dia
+              </p>
+              <span className="text-[11px] text-zinc-500">
+                Quita os custos fixos em ~{Math.max(1, Math.ceil(state.fixedCosts.reduce((a, b) => a + b.monthlyAmount, 0) / Math.max(1, burgerPlanner.dailyFixedPool)))} dias
+              </span>
+            </div>
+
+            <div className="bg-[#18181c] border border-emerald-500/25 rounded-[8px] p-3">
+              <span className="text-emerald-400 font-medium">Lucro Líquido Estimado</span>
+              <p className="text-base font-semibold text-emerald-400 mt-0.5">
+                {formatBRL(burgerPlanner.dailyNetProfit)}/dia
+              </p>
+              <span className="text-[11px] text-zinc-400">
+                +{formatBRL(burgerPlanner.dailyFixedPool)}/dia extra após quitar fixos do mês
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Pricing Table */}
       <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
@@ -99,7 +258,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                 <th className="py-3 px-3 font-medium text-right">CMV</th>
                 <th className="py-3 px-3 font-medium text-center">Fixos (%)</th>
                 <th className="py-3 px-3 font-medium text-center">Impostos (%)</th>
-                <th className="py-3 px-3 font-medium text-center">Taxa (%)</th>
+                <th className="py-3 px-3 font-medium text-center text-orange-300">Taxa Entrega (%)</th>
                 <th className="py-3 px-3 font-medium text-center">Meta (%)</th>
                 <th className="py-3 px-3 font-medium text-right">Sugerido</th>
                 <th className="py-3 px-3 font-medium text-right">Praticado</th>
@@ -167,7 +326,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                       <input
                         type="number"
                         step="0.1"
-                        aria-label="Taxa Maquininha Percentual"
+                        aria-label="Taxa de Entrega Percentual"
                         value={Number((product.channelFeePct * 100).toFixed(2))}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) =>
@@ -177,7 +336,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                             (parseFloat(e.target.value) || 0) / 100
                           )
                         }
-                        className="w-16 bg-[#09090b] border border-white/[0.1] focus-visible:border-zinc-400 rounded-[6px] px-2 py-1 text-center text-zinc-200 outline-none"
+                        className="w-16 bg-[#09090b] border border-orange-500/30 focus-visible:border-orange-400 rounded-[6px] px-2 py-1 text-center text-orange-200 outline-none"
                       />
                     </td>
                     <td className="py-2.5 px-3 text-center">
@@ -284,10 +443,9 @@ export default function PricingTab({ state, onUpdateState }: Props) {
             <div className="flex flex-wrap gap-1.5">
               {(
                 [
-                  { id: 'padrao', label: `Taxa Padrão (${formatPct(selectedProduct.channelFeePct, 1)})` },
-                  { id: 'pix', label: `PIX (${formatPct(state.settings.pixFeePct, 1)})` },
-                  { id: 'debito_infinite', label: `Cartão Débito (${formatPct(state.settings.debitCardFeePct, 2)})` },
-                  { id: 'credito_infinite', label: `Cartão Crédito (${formatPct(state.settings.creditCardFeePct, 2)})` },
+                  { id: 'padrao', label: 'PIX / Dinheiro (0% maq.)' },
+                  { id: 'debito_infinite', label: `Cartão Débito (+${formatPct(state.settings.debitCardFeePct, 2)} maq.)` },
+                  { id: 'credito_infinite', label: `Cartão Crédito (+${formatPct(state.settings.creditCardFeePct, 2)} maq.)` },
                 ] as const
               ).map((mode) => (
                 <button
@@ -318,7 +476,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
             </div>
 
             <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
-              <p className="text-[11px] text-zinc-400">CMV Total</p>
+              <p className="text-[11px] text-zinc-400">CMV (Reposição)</p>
               <p className="text-base font-semibold text-rose-400 mt-1">
                 -{formatBRL(simResult.totalCmv)}
               </p>
@@ -329,12 +487,12 @@ export default function PricingTab({ state, onUpdateState }: Props) {
 
             <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
               <p className="text-[11px] text-zinc-400">
-                Rateio Fixos ({formatPct(selectedProduct.fixedCostPct, 1)})
+                Custos Fixos ({formatPct(selectedProduct.fixedCostPct, 1)})
               </p>
               <p className="text-base font-semibold text-zinc-200 mt-1">
                 -{formatBRL(simResult.fixedCostAmount)}
               </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Custos operacionais</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">Vira lucro após quitar o mês</p>
             </div>
 
             <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
@@ -344,15 +502,21 @@ export default function PricingTab({ state, onUpdateState }: Props) {
               <p className="text-base font-semibold text-zinc-200 mt-1">
                 -{formatBRL(simResult.taxAmount)}
               </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Reserva MEI</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">Reserva MEI / Fiscal</p>
             </div>
 
-            <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
-              <p className="text-[11px] text-zinc-400">Taxa Pagamento</p>
-              <p className="text-base font-semibold text-zinc-200 mt-1">
+            <div className="bg-[#18181c] border border-orange-500/25 rounded-[8px] p-3">
+              <p className="text-[11px] text-orange-300 font-medium">
+                Taxa Entrega ({formatPct(selectedProduct.channelFeePct, 1)})
+              </p>
+              <p className="text-base font-semibold text-orange-400 mt-1">
                 -{formatBRL(simResult.channelFeeAmount)}
               </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Maquininha / Link</p>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                {simResult.cardFeeAmount > 0
+                  ? `+Maq: -${formatBRL(simResult.cardFeeAmount)}`
+                  : 'Verba do entregador'}
+              </p>
             </div>
 
             <div className="bg-[#18181c] border border-emerald-500/30 rounded-[8px] p-3">
