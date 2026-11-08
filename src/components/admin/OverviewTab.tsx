@@ -499,39 +499,21 @@ export default function OverviewTab({ state, onNavigate }: Props) {
                   </span>
                 </span>
               </div>
-              <div className="py-2 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-400">2. Reserva de Impostos (MEI)</span>
-                  <span className="tabular-nums font-medium text-zinc-200">
-                    {formatBRL(analytics.totalTax)}{' '}
-                    <span className="text-zinc-500 font-normal">
-                      (
-                      {formatPct(
-                        analytics.grossRevenue > 0
-                          ? analytics.totalTax / analytics.grossRevenue
-                          : 0,
-                        1
-                      )}
-                      )
-                    </span>
+              <div className="py-2 flex items-center justify-between">
+                <span className="text-sky-300 font-medium">2. Taxa Cartão (InfinitePay)</span>
+                <span className="tabular-nums font-medium text-sky-200">
+                  {formatBRL(analytics.totalCardMachineFee)}{' '}
+                  <span className="text-zinc-500 font-normal">
+                    (
+                    {formatPct(
+                      analytics.grossRevenue > 0
+                        ? analytics.totalCardMachineFee / analytics.grossRevenue
+                        : 0,
+                      1
+                    )}
+                    )
                   </span>
-                </div>
-                <p className="text-[11px] text-zinc-500 flex items-center justify-between">
-                  <span>
-                    Meta mensal MEI: {formatBRL(Math.min(analytics.totalMonthTaxAccumulated, analytics.totalMonthlyTaxTarget))} / {formatBRL(analytics.totalMonthlyTaxTarget)}
-                  </span>
-                  <span className="tabular-nums">
-                    {formatPct(analytics.taxCoveragePct, 0)} quitado
-                  </span>
-                </p>
-                {analytics.taxOverflowToProfit > 0 && (
-                  <div className="mt-1 px-2.5 py-1 rounded-[6px] bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-[11px] text-emerald-300">
-                    <span>↳ Sobra de MEI (Quitado → Lucro)</span>
-                    <span className="font-semibold tabular-nums">
-                      +{formatBRL(analytics.taxOverflowToProfit)}
-                    </span>
-                  </div>
-                )}
+                </span>
               </div>
               <div className="py-2 flex items-center justify-between">
                 <span className="text-orange-300 font-medium">3. Taxas do Entregador</span>
@@ -549,17 +531,11 @@ export default function OverviewTab({ state, onNavigate }: Props) {
                   </span>
                 </span>
               </div>
-              {analytics.totalCardMachineFee > 0 && (
-                <div className="py-2 flex items-center justify-between">
-                  <span className="text-zinc-400">Taxas da Maquininha (Cartão)</span>
-                  <span className="tabular-nums font-medium text-zinc-200">
-                    {formatBRL(analytics.totalCardMachineFee)}
-                  </span>
-                </div>
-              )}
               <div className="py-2 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-zinc-400">4. Custos Fixos (Rateio de Contas)</span>
+                  <span className="text-zinc-300 font-medium">
+                    4. Despesas Fixas + MEI
+                  </span>
                   <span className="tabular-nums font-medium text-zinc-200">
                     {formatBRL(analytics.effectiveFixedCost)}{' '}
                     <span className="text-zinc-500 font-normal">
@@ -584,7 +560,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
                 </div>
                 <p className="text-[11px] text-zinc-500 flex items-center justify-between">
                   <span>
-                    Meta mensal: {formatBRL(Math.min(analytics.totalMonthFixedAccumulated, analytics.totalFixedCosts))} / {formatBRL(analytics.totalFixedCosts)}
+                    Contas + MEI: {formatBRL(Math.min(analytics.totalMonthFixedAccumulated, analytics.totalFixedCosts))} / {formatBRL(analytics.totalFixedCosts)}
                   </span>
                   <span className="tabular-nums">
                     {formatPct(analytics.fixedCostCoveragePct, 0)} quitado
@@ -592,7 +568,7 @@ export default function OverviewTab({ state, onNavigate }: Props) {
                 </p>
                 {analytics.fixedCostOverflowToProfit > 0 && (
                   <div className="mt-1 px-2.5 py-1.5 rounded-[6px] bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-[11px] text-emerald-300">
-                    <span>↳ Sobra de Custo Fixo (Contas Pagas → Lucro)</span>
+                    <span>↳ Sobra de Fixos + MEI (Quitado → Lucro)</span>
                     <span className="font-semibold tabular-nums">
                       +{formatBRL(analytics.fixedCostOverflowToProfit)}
                     </span>

@@ -21,8 +21,8 @@ export default function PricingTab({ state, onUpdateState }: Props) {
   );
 
   const [simPaymentMode, setSimPaymentMode] = useState<
-    'padrao' | 'pix' | 'debito_infinite' | 'credito_infinite'
-  >('padrao');
+    'credito_infinite' | 'debito_infinite' | 'padrao'
+  >('credito_infinite');
 
   const rows = useMemo(() => {
     return state.products.map((product) => {
@@ -63,22 +63,31 @@ export default function PricingTab({ state, onUpdateState }: Props) {
   const simResult = useMemo(() => {
     if (!selectedProduct) return null;
     const base = calculateProductMetrics(selectedProduct, state.ingredients);
-    let cardFeePct = 0;
-    if (simPaymentMode === 'pix') cardFeePct = state.settings.pixFeePct;
-    else if (simPaymentMode === 'debito_infinite') cardFeePct = state.settings.debitCardFeePct;
-    else if (simPaymentMode === 'credito_infinite') cardFeePct = state.settings.creditCardFeePct;
+    // Na tabela, product.taxPct já representa a taxa de Cartão de Crédito da InfinitePay (ex: 3,15%).
+    // No simulador, comparamos o Crédito (padrão da tabela) com Débito (1,37%) ou PIX/Dinheiro (0%).
+    let appliedCardFeePct = selectedProduct.taxPct;
+    if (simPaymentMode === 'padrao') {
+      appliedCardFeePct = state.settings.pixFeePct || 0;
+    } else if (simPaymentMode === 'debito_infinite') {
+      appliedCardFeePct = state.settings.debitCardFeePct || 0.0137;
+    }
 
-    const cardFeeAmount = base.practicedPrice * cardFeePct;
-    const netProfitAfterCard = base.netProfit - cardFeeAmount;
-    const realMarginAfterCard =
-      base.practicedPrice > 0 ? netProfitAfterCard / base.practicedPrice : 0;
+    const appliedCardFeeAmount = base.practicedPrice * appliedCardFeePct;
+    const netProfitForMode =
+      base.practicedPrice -
+      base.totalCmv -
+      base.fixedCostAmount -
+      base.channelFeeAmount -
+      appliedCardFeeAmount;
+    const realMarginForMode =
+      base.practicedPrice > 0 ? netProfitForMode / base.practicedPrice : 0;
 
     return {
       ...base,
-      cardFeePct,
-      cardFeeAmount,
-      netProfit: netProfitAfterCard,
-      realMarginPct: realMarginAfterCard,
+      appliedCardFeePct,
+      appliedCardFeeAmount,
+      netProfit: netProfitForMode,
+      realMarginPct: realMarginForMode,
     };
   }, [selectedProduct, simPaymentMode, state.ingredients, state.settings]);
 
@@ -89,11 +98,11 @@ export default function PricingTab({ state, onUpdateState }: Props) {
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Precificação e Margem</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Cálculo por Markup Divisor conectado às fichas técnicas e à provisão do entregador.
+            Cálculo por Markup Divisor com Despesas Fixas (c/ MEI), Taxa Cartão Crédito InfinitePay e Taxa do Entregador.
           </p>
         </div>
         <div className="text-xs text-zinc-400 bg-[#121215] border border-white/[0.08] rounded-[6px] px-3 py-1.5 tabular-nums">
-          Fórmula: CMV ÷ [1 - (Fixos + Impostos + Taxa Entrega + Margem Alvo)]
+          Fórmula: CMV ÷ [1 - (Fixos c/ MEI + Cartão Créd. + Taxa Entrega + Margem Alvo)]
         </div>
       </div>
 
@@ -106,9 +115,15 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                 <th className="py-3 px-4 font-medium">Produto</th>
                 <th className="py-3 px-3 font-medium">Canal</th>
                 <th className="py-3 px-3 font-medium text-right">CMV</th>
-                <th className="py-3 px-3 font-medium text-center">Fixos (%)</th>
-                <th className="py-3 px-3 font-medium text-center">Impostos (%)</th>
-                <th className="py-3 px-3 font-medium text-center text-orange-300">Taxa Entrega (%)</th>
+                <th className="py-3 px-3 font-medium text-center" title="Rateio das Despesas Fixas Mensais + Guia MEI">
+                  Fixos + MEI (%)
+                </th>
+                <th className="py-3 px-3 font-medium text-center text-sky-300" title="Taxa da maquininha InfinitePay no Cartão de Crédito">
+                  Cartão Créd. (%)
+                </th>
+                <th className="py-3 px-3 font-medium text-center text-orange-300" title="Reserva por lanche para pagar a diária do entregador">
+                  Taxa Entrega (%)
+                </th>
                 <th className="py-3 px-3 font-medium text-center">Meta (%)</th>
                 <th className="py-3 px-3 font-medium text-right">Sugerido</th>
                 <th className="py-3 px-3 font-medium text-right">Praticado</th>
@@ -141,8 +156,8 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                     <td className="py-2.5 px-3 text-center">
                       <input
                         type="number"
-                        step="0.5"
-                        aria-label="Custos Fixos Percentual"
+                        step="0.1"
+                        aria-label="Custos Fixos mais MEI Percentual"
                         value={Number((product.fixedCostPct * 100).toFixed(2))}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) =>
@@ -158,8 +173,8 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                     <td className="py-2.5 px-3 text-center">
                       <input
                         type="number"
-                        step="0.1"
-                        aria-label="Impostos Percentual"
+                        step="0.05"
+                        aria-label="Taxa Cartão de Crédito InfinitePay Percentual"
                         value={Number((product.taxPct * 100).toFixed(2))}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) =>
@@ -169,7 +184,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                             (parseFloat(e.target.value) || 0) / 100
                           )
                         }
-                        className="w-16 bg-[#09090b] border border-white/[0.1] focus-visible:border-zinc-400 rounded-[6px] px-2 py-1 text-center text-zinc-200 outline-none"
+                        className="w-16 bg-[#09090b] border border-sky-500/30 focus-visible:border-sky-400 rounded-[6px] px-2 py-1 text-center text-sky-200 outline-none"
                       />
                     </td>
                     <td className="py-2.5 px-3 text-center">
@@ -293,9 +308,15 @@ export default function PricingTab({ state, onUpdateState }: Props) {
             <div className="flex flex-wrap gap-1.5">
               {(
                 [
-                  { id: 'padrao', label: 'PIX / Dinheiro (0% maq.)' },
-                  { id: 'debito_infinite', label: `Cartão Débito (+${formatPct(state.settings.debitCardFeePct, 2)} maq.)` },
-                  { id: 'credito_infinite', label: `Cartão Crédito (+${formatPct(state.settings.creditCardFeePct, 2)} maq.)` },
+                  {
+                    id: 'credito_infinite',
+                    label: `Cartão Crédito InfinitePay (${formatPct(selectedProduct.taxPct, 2)})`,
+                  },
+                  {
+                    id: 'debito_infinite',
+                    label: `Cartão Débito InfinitePay (${formatPct(state.settings.debitCardFeePct, 2)})`,
+                  },
+                  { id: 'padrao', label: 'PIX / Dinheiro (0% Maquininha)' },
                 ] as const
               ).map((mode) => (
                 <button
@@ -337,7 +358,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
 
             <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
               <p className="text-[11px] text-zinc-400">
-                Custos Fixos ({formatPct(selectedProduct.fixedCostPct, 1)})
+                Fixos + MEI ({formatPct(selectedProduct.fixedCostPct, 2)})
               </p>
               <p className="text-base font-semibold text-zinc-200 mt-1">
                 -{formatBRL(simResult.fixedCostAmount)}
@@ -345,14 +366,18 @@ export default function PricingTab({ state, onUpdateState }: Props) {
               <p className="text-[11px] text-zinc-500 mt-0.5">Vira lucro após quitar o mês</p>
             </div>
 
-            <div className="bg-[#18181c] border border-white/[0.06] rounded-[8px] p-3">
-              <p className="text-[11px] text-zinc-400">
-                Impostos ({formatPct(selectedProduct.taxPct, 1)})
+            <div className="bg-[#18181c] border border-sky-500/25 rounded-[8px] p-3">
+              <p className="text-[11px] text-sky-300 font-medium">
+                Taxa Maquininha ({formatPct(simResult.appliedCardFeePct, 2)})
               </p>
-              <p className="text-base font-semibold text-zinc-200 mt-1">
-                -{formatBRL(simResult.taxAmount)}
+              <p className="text-base font-semibold text-sky-300 mt-1">
+                -{formatBRL(simResult.appliedCardFeeAmount)}
               </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Reserva MEI / Fiscal</p>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                {simPaymentMode === 'padrao'
+                  ? 'PIX/Dinheiro: vira lucro!'
+                  : 'Taxa InfinitePay aplicada'}
+              </p>
             </div>
 
             <div className="bg-[#18181c] border border-orange-500/25 rounded-[8px] p-3">
@@ -362,11 +387,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
               <p className="text-base font-semibold text-orange-400 mt-1">
                 -{formatBRL(simResult.channelFeeAmount)}
               </p>
-              <p className="text-[11px] text-zinc-400 mt-0.5">
-                {simResult.cardFeeAmount > 0
-                  ? `+Maq: -${formatBRL(simResult.cardFeeAmount)}`
-                  : 'Verba do entregador'}
-              </p>
+              <p className="text-[11px] text-zinc-400 mt-0.5">Verba do entregador</p>
             </div>
 
             <div className="bg-[#18181c] border border-emerald-500/30 rounded-[8px] p-3">

@@ -129,9 +129,9 @@ export function calculateOrderFinancials(
 ): OrderFinancialBreakdown {
   const prodMap = new Map(products.map((p) => [p.id, p]));
   let itemsCmv = 0;
-  let taxReserveAmount = 0;
   let deliveryFeeReserveAmount = 0;
   let fixedCostAllocationAmount = 0;
+  let creditCardWeightedFee = 0;
 
   for (const item of order.items) {
     const product = prodMap.get(item.productId);
@@ -146,11 +146,12 @@ export function calculateOrderFinancials(
         : 0;
     itemsCmv += unitCmv * qty;
 
-    const taxPct = product ? product.taxPct : settings.estimatedTaxPct;
+    // product.taxPct na Precificação agora representa a Taxa do Cartão de Crédito (InfinitePay)
+    const itemCreditFeePct = product ? product.taxPct : settings.creditCardFeePct || 0.0315;
     const deliveryFeePct = product ? product.channelFeePct : settings.defaultChannelFeePct;
     const fixedPct = product ? product.fixedCostPct : settings.defaultFixedCostPct;
 
-    taxReserveAmount += itemRev * taxPct;
+    creditCardWeightedFee += itemRev * itemCreditFeePct;
     deliveryFeeReserveAmount += itemRev * deliveryFeePct;
     fixedCostAllocationAmount += itemRev * fixedPct;
   }
@@ -160,29 +161,33 @@ export function calculateOrderFinancials(
     deliveryFeeReserveAmount += order.deliveryFee;
   }
 
-  let cardFeePct = 0;
+  const totalAmount = order.totalAmount || order.subtotal || 0;
+  let cardMachineFeeAmount = 0;
+
   if (
     order.paymentMethod === 'PIX' ||
     order.paymentMethod === 'PIX (Mercado Pago / Chave)'
   ) {
-    cardFeePct = settings.pixFeePct || 0;
+    cardMachineFeeAmount = totalAmount * (settings.pixFeePct || 0);
   } else if (
     order.paymentMethod === 'Cartão de Crédito (Na Entrega)' ||
     order.paymentMethod === 'Cartão na Entrega (Maquininha InfinitePay)'
   ) {
-    cardFeePct = settings.creditCardFeePct || 0;
+    cardMachineFeeAmount =
+      creditCardWeightedFee > 0
+        ? creditCardWeightedFee + (order.deliveryFee || 0) * (settings.creditCardFeePct || 0.0315)
+        : totalAmount * (settings.creditCardFeePct || 0.0315);
   } else if (order.paymentMethod === 'Cartão de Débito (Na Entrega)') {
-    cardFeePct = settings.debitCardFeePct || 0;
+    cardMachineFeeAmount = totalAmount * (settings.debitCardFeePct || 0.0137);
   }
 
-  const totalAmount = order.totalAmount || order.subtotal || 0;
-  const cardMachineFeeAmount = totalAmount * cardFeePct;
+  // Imposto MEI (R$ 80) agora entra junto das Despesas Fixas Mensais (fixedCostAllocationAmount)
+  const taxReserveAmount = 0;
   const totalCmv = itemsCmv > 0 ? itemsCmv : order.totalCmv || 0;
 
   const baseNetProfit =
     totalAmount -
     totalCmv -
-    taxReserveAmount -
     deliveryFeeReserveAmount -
     cardMachineFeeAmount -
     fixedCostAllocationAmount;
@@ -217,6 +222,7 @@ export interface PeriodFinancialSummary {
   baseNetProfit: number;
   realNetProfit: number;
   totalMonthlyFixedTarget: number;
+  totalMonthlyOperationalFixed: number;
   totalMonthlyAllBills: number;
   totalMonthFixedAccumulated: number;
   fixedCostCoveragePct: number;
@@ -231,13 +237,12 @@ export function calculatePeriodFinancialSummary(
   fixedCosts: FixedCostItem[],
   settings: PaymentFeeConfig,
   priorFixedCostAccumulated = 0,
-  priorTaxAccumulated = 0
+  _priorTaxAccumulated = 0
 ): PeriodFinancialSummary {
   const validOrders = periodOrders.filter((o) => o.status !== 'Cancelado');
 
   let grossRevenue = 0;
   let totalSalesCmv = 0;
-  let rawTaxReserve = 0;
   let totalDeliveryDriverReserve = 0;
   let totalCardMachineFee = 0;
   let rawFixedCostReserve = 0;
@@ -247,15 +252,13 @@ export function calculatePeriodFinancialSummary(
     const fin = calculateOrderFinancials(ord, products, ingredients, settings);
     grossRevenue += fin.totalAmount;
     totalSalesCmv += fin.totalCmv;
-    rawTaxReserve += fin.taxReserveAmount;
     totalDeliveryDriverReserve += fin.deliveryFeeReserveAmount;
     totalCardMachineFee += fin.cardMachineFeeAmount;
     rawFixedCostReserve += fin.fixedCostAllocationAmount;
     baseNetProfit += fin.baseNetProfit;
   }
 
-  // Separa Imposto Mensal MEI (ex: R$ 80) das demais Despesas Fixas Operacionais (Energia, Água, Gás, Internet, Combustível = R$ 519,90)
-  // Assim o MEI nunca é cobrado em duplicidade nos dois potes!
+  // O MEI (ex: R$ 80) agora entra junto das Despesas Fixas Mensais (Total: R$ 599,90/mês)
   const meiItems = fixedCosts.filter(
     (fc) => fc.category === 'Impostos Fixos (MEI)' || fc.id === 'fc-mei'
   );
@@ -268,36 +271,19 @@ export function calculatePeriodFinancialSummary(
       ? meiItems.reduce((acc, fc) => acc + (Number(fc.monthlyAmount) || 0), 0)
       : Number(settings.meiMonthlyDas) || 80;
 
-  const totalMonthlyFixedTarget = operationalFixedItems.reduce(
+  const totalMonthlyOperationalFixed = operationalFixedItems.reduce(
     (acc, fc) => acc + (Number(fc.monthlyAmount) || 0),
     0
   );
 
-  const totalMonthlyAllBills = totalMonthlyFixedTarget + totalMonthlyTaxTarget;
-
-  // Teto mensal do Imposto MEI (ex: R$ 80/mês)
-  const remainingTaxTargetBeforePeriod = Math.max(
-    0,
-    totalMonthlyTaxTarget - priorTaxAccumulated
+  // Meta mensal unificada de Despesas Fixas (Contas + MEI = R$ 599,90)
+  const totalMonthlyFixedTarget = fixedCosts.reduce(
+    (acc, fc) => acc + (Number(fc.monthlyAmount) || 0),
+    0
   );
-  const totalTaxReserve =
-    totalMonthlyTaxTarget > 0
-      ? Math.min(rawTaxReserve, remainingTaxTargetBeforePeriod)
-      : rawTaxReserve;
-  const taxOverflowToProfit =
-    totalMonthlyTaxTarget > 0
-      ? Math.max(0, rawTaxReserve - remainingTaxTargetBeforePeriod)
-      : 0;
-  const totalMonthTaxAccumulated = priorTaxAccumulated + rawTaxReserve;
-  const taxCoveragePct =
-    totalMonthlyTaxTarget > 0
-      ? Math.min(1, totalMonthTaxAccumulated / totalMonthlyTaxTarget)
-      : 1;
-  const isTaxFullyPaid =
-    totalMonthlyTaxTarget > 0 && totalMonthTaxAccumulated >= totalMonthlyTaxTarget;
-  const missingToPayTax = Math.max(0, totalMonthlyTaxTarget - totalMonthTaxAccumulated);
+  const totalMonthlyAllBills = totalMonthlyFixedTarget;
 
-  // Teto mensal dos Custos Fixos Operacionais (ex: R$ 519,90/mês)
+  // Teto mensal unificado de Despesas Fixas + MEI (ex: R$ 599,90/mês)
   const remainingTargetBeforePeriod = Math.max(
     0,
     totalMonthlyFixedTarget - priorFixedCostAccumulated
@@ -313,8 +299,7 @@ export function calculatePeriodFinancialSummary(
       ? Math.max(0, rawFixedCostReserve - remainingTargetBeforePeriod)
       : 0;
 
-  const realNetProfit =
-    baseNetProfit + fixedCostOverflowToProfit + taxOverflowToProfit;
+  const realNetProfit = baseNetProfit + fixedCostOverflowToProfit;
 
   const totalMonthFixedAccumulated = priorFixedCostAccumulated + rawFixedCostReserve;
   const fixedCostCoveragePct =
@@ -327,6 +312,20 @@ export function calculatePeriodFinancialSummary(
     0,
     totalMonthlyFixedTarget - totalMonthFixedAccumulated
   );
+
+  // Proporção informativa do MEI dentro do bolo de Despesas Fixas
+  const meiShareRatio =
+    totalMonthlyFixedTarget > 0 ? totalMonthlyTaxTarget / totalMonthlyFixedTarget : 0;
+  const rawTaxReserve = rawFixedCostReserve * meiShareRatio;
+  const totalTaxReserve = effectiveFixedCost * meiShareRatio;
+  const taxOverflowToProfit = 0;
+  const totalMonthTaxAccumulated = Math.min(
+    totalMonthlyTaxTarget,
+    totalMonthFixedAccumulated * meiShareRatio
+  );
+  const taxCoveragePct = fixedCostCoveragePct;
+  const isTaxFullyPaid = isFixedCostFullyPaid;
+  const missingToPayTax = Math.max(0, totalMonthlyTaxTarget - totalMonthTaxAccumulated);
 
   return {
     grossRevenue,
@@ -347,6 +346,7 @@ export function calculatePeriodFinancialSummary(
     baseNetProfit,
     realNetProfit,
     totalMonthlyFixedTarget,
+    totalMonthlyOperationalFixed,
     totalMonthlyAllBills,
     totalMonthFixedAccumulated,
     fixedCostCoveragePct,
