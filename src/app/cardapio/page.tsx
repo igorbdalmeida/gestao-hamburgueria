@@ -100,6 +100,7 @@ export default function CardapioVirtualPage() {
   const [detailQty, setDetailQty] = useState<number>(1);
   const [detailNotes, setDetailNotes] = useState<string>('');
   const [selectedUpsellDrinkIds, setSelectedUpsellDrinkIds] = useState<string[]>([]);
+  const [zoomPhotoItem, setZoomPhotoItem] = useState<PublicMenuItem | null>(null);
 
   // Customer identification
   const [phone, setPhone] = useState('');
@@ -783,12 +784,21 @@ export default function CardapioVirtualPage() {
                     className="bg-[#121215] border border-white/[0.08] hover:border-orange-500/40 rounded-[12px] overflow-hidden flex flex-col justify-between cursor-pointer group transition shadow-md"
                   >
                     <div>
-                      <div className="h-28 bg-[#18181c] relative overflow-hidden flex items-center justify-center text-3xl">
+                      <div
+                        onClick={(e) => {
+                          if (item.imageUrl) {
+                            e.stopPropagation();
+                            setZoomPhotoItem(item);
+                          }
+                        }}
+                        className="aspect-square bg-[#09090b] relative overflow-hidden flex items-center justify-center text-3xl"
+                        title={item.imageUrl ? 'Toque para ampliar a foto' : undefined}
+                      >
                         {item.imageUrl ? (
                           <img
                             src={item.imageUrl}
                             alt={item.name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
                           />
                         ) : (
                           <span>{item.imageEmoji}</span>
@@ -876,14 +886,21 @@ export default function CardapioVirtualPage() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div
-                    onClick={() => openProductDetail(item)}
-                    className="size-24 rounded-[10px] bg-[#18181c] border border-white/[0.08] overflow-hidden flex items-center justify-center text-3xl relative shadow-md"
+                    onClick={() => {
+                      if (item.imageUrl) {
+                        setZoomPhotoItem(item);
+                      } else {
+                        openProductDetail(item);
+                      }
+                    }}
+                    className="size-24 rounded-[10px] bg-[#09090b] border border-white/[0.08] overflow-hidden flex items-center justify-center text-3xl relative shadow-md"
+                    title={item.imageUrl ? 'Toque para ampliar a foto' : undefined}
                   >
                     {item.imageUrl ? (
                       <img
                         src={item.imageUrl}
                         alt={item.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (
                       <span>{item.imageEmoji}</span>
@@ -938,12 +955,22 @@ export default function CardapioVirtualPage() {
             className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="relative h-52 bg-[#18181c] flex items-center justify-center">
+            <div
+              onClick={() => {
+                if (detailItem.imageUrl) {
+                  setZoomPhotoItem(detailItem);
+                }
+              }}
+              className={`relative min-h-[14rem] max-h-80 bg-[#09090b] flex items-center justify-center ${
+                detailItem.imageUrl ? 'cursor-zoom-in' : ''
+              }`}
+              title={detailItem.imageUrl ? 'Toque para ver a foto em tela cheia' : undefined}
+            >
               {detailItem.imageUrl ? (
                 <img
                   src={detailItem.imageUrl}
                   alt={detailItem.name}
-                  className="w-full h-full object-cover"
+                  className="w-full max-h-80 object-contain"
                 />
               ) : (
                 <span className="text-6xl">{detailItem.imageEmoji}</span>
@@ -951,7 +978,10 @@ export default function CardapioVirtualPage() {
               <button
                 type="button"
                 aria-label="Fechar detalhes"
-                onClick={() => setDetailItem(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDetailItem(null);
+                }}
                 className="absolute top-3 right-3 size-8 rounded-full bg-black/70 text-zinc-200 hover:text-white flex items-center justify-center"
               >
                 <X className="size-4" />
@@ -1068,6 +1098,55 @@ export default function CardapioVirtualPage() {
                   </span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full-Screen Photo Lightbox when customer taps/clicks on the burger photo */}
+      {zoomPhotoItem && zoomPhotoItem.imageUrl && (
+        <div
+          className="fixed inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-4 backdrop-blur-sm"
+          onClick={() => setZoomPhotoItem(null)}
+        >
+          <button
+            type="button"
+            aria-label="Fechar foto ampliada"
+            onClick={() => setZoomPhotoItem(null)}
+            className="absolute top-4 right-4 size-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
+          >
+            <X className="size-5" />
+          </button>
+
+          <div
+            className="max-w-lg w-full flex flex-col items-center gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={zoomPhotoItem.imageUrl}
+              alt={zoomPhotoItem.name}
+              className="w-full max-h-[72vh] object-contain rounded-[14px] border border-white/[0.12] bg-[#09090b] shadow-2xl"
+            />
+            <div className="w-full bg-[#121215] border border-white/[0.1] rounded-[12px] p-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-100">{zoomPhotoItem.name}</h3>
+                <p className="text-xs font-semibold text-orange-400 tabular-nums mt-0.5">
+                  {formatBRL(zoomPhotoItem.price)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = zoomPhotoItem;
+                  setZoomPhotoItem(null);
+                  if (!detailItem || detailItem.id !== target.id) {
+                    openProductDetail(target);
+                  }
+                }}
+                className="px-4 py-2 bg-[#ff5400] hover:bg-[#ea4b00] text-white text-xs font-semibold rounded-[8px] transition shrink-0"
+              >
+                + Escolher este item
+              </button>
             </div>
           </div>
         </div>

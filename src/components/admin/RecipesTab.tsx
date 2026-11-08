@@ -4,8 +4,11 @@ import { compressImageFile } from '@/lib/image-utils';
 import { calculateProductMetrics, formatBRL, formatPct } from '@/lib/pricing';
 import { AppDatabaseState, Product, RecipeItem } from '@/lib/types';
 import {
+  ArrowDown,
+  ArrowUp,
   Camera,
   Copy,
+  GripVertical,
   Image as ImageIcon,
   Package,
   Plus,
@@ -35,6 +38,8 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
   const [addIngId, setAddIngId] = useState<string>(state.ingredients[0]?.id || '');
   const [addQty, setAddQty] = useState<string>('30');
+  const [draggedIngId, setDraggedIngId] = useState<string | null>(null);
+  const [dragOverIngId, setDragOverIngId] = useState<string | null>(null);
 
   const selectedProduct =
     state.products.find((p) => p.id === selectedId) || state.products[0];
@@ -47,10 +52,10 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
     if (!file) return;
     try {
       const compressed = await compressImageFile(file, {
-        maxWidth: 520,
-        maxHeight: 520,
-        quality: 0.84,
-        squareCrop: true,
+        maxWidth: 800,
+        maxHeight: 800,
+        quality: 0.86,
+        squareCrop: false,
       });
       if (target === 'new') {
         setNewImageUrl(compressed.dataUrl);
@@ -126,6 +131,59 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         };
       }),
     }));
+  }
+
+  function handleReorderRecipeItem(
+    sourceIngId: string,
+    targetIngId: string,
+    group: 'alimento' | 'embalagem'
+  ) {
+    if (!selectedProduct || sourceIngId === targetIngId) return;
+    const ingMap = new Map(state.ingredients.map((i) => [i.id, i]));
+    const getGroup = (r: RecipeItem): 'alimento' | 'embalagem' => {
+      const ing = ingMap.get(r.ingredientId);
+      return r.group === 'embalagem' || ing?.category === 'Embalagem'
+        ? 'embalagem'
+        : 'alimento';
+    };
+
+    onUpdateState((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => {
+        if (p.id !== selectedProduct.id) return p;
+        const foodList = p.recipe.filter((r) => getGroup(r) === 'alimento');
+        const packList = p.recipe.filter((r) => getGroup(r) === 'embalagem');
+        const activeList = group === 'alimento' ? [...foodList] : [...packList];
+
+        const fromIdx = activeList.findIndex((r) => r.ingredientId === sourceIngId);
+        const toIdx = activeList.findIndex((r) => r.ingredientId === targetIngId);
+        if (fromIdx < 0 || toIdx < 0) return p;
+
+        const [moved] = activeList.splice(fromIdx, 1);
+        activeList.splice(toIdx, 0, moved);
+
+        return {
+          ...p,
+          recipe:
+            group === 'alimento'
+              ? [...activeList, ...packList]
+              : [...foodList, ...activeList],
+        };
+      }),
+    }));
+  }
+
+  function handleMoveRecipeStep(
+    ingredientId: string,
+    direction: -1 | 1,
+    group: 'alimento' | 'embalagem'
+  ) {
+    if (!selectedProduct) return;
+    const list = group === 'alimento' ? foodItems : packagingItems;
+    const idx = list.findIndex((i) => i.ingredientId === ingredientId);
+    const targetIdx = idx + direction;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= list.length) return;
+    handleReorderRecipeItem(ingredientId, list[targetIdx].ingredientId, group);
   }
 
   function handleAddStandardPackagingKit() {
@@ -422,6 +480,9 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
               <div className="flex items-center justify-between text-xs font-medium text-zinc-300">
                 <span className="flex items-center gap-1.5">
                   <Utensils className="size-3.5 text-zinc-400" /> Alimentos
+                  <span className="text-[11px] font-normal text-zinc-500">
+                    (Arraste as linhas para organizar a ordem)
+                  </span>
                 </span>
                 <span className="tabular-nums">Subtotal: {formatBRL(metrics.foodCost)}</span>
               </div>
@@ -438,43 +499,126 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.06]">
-                    {foodItems.map((item) => (
-                      <tr key={item.ingredientId} className="hover:bg-white/[0.02]">
-                        <td className="py-2 px-3 text-zinc-200">{item.name}</td>
-                        <td className="py-2 px-3 text-center">
-                          <input
-                            type="number"
-                            step="any"
-                            aria-label={`Quantidade de ${item.name}`}
-                            value={item.quantity}
-                            onChange={(e) =>
-                              handleUpdateRecipeQty(
-                                item.ingredientId,
-                                parseFloat(e.target.value) || 0
-                              )
+                    {foodItems.map((item, idx) => {
+                      const isDragging = draggedIngId === item.ingredientId;
+                      const isDragOver =
+                        dragOverIngId === item.ingredientId &&
+                        draggedIngId !== item.ingredientId;
+
+                      return (
+                        <tr
+                          key={item.ingredientId}
+                          draggable
+                          onDragStart={(e) => {
+                            setDraggedIngId(item.ingredientId);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            if (dragOverIngId !== item.ingredientId) {
+                              setDragOverIngId(item.ingredientId);
                             }
-                            className="w-20 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-center text-zinc-100"
-                          />
-                        </td>
-                        <td className="py-2 px-3 text-center text-zinc-500">{item.usageUnit}</td>
-                        <td className="py-2 px-3 text-right text-zinc-400">
-                          {formatBRL(item.unitCost, 4)}
-                        </td>
-                        <td className="py-2 px-3 text-right font-medium text-zinc-200">
-                          {formatBRL(item.subtotal)}
-                        </td>
-                        <td className="py-2 px-2 text-center">
-                          <button
-                            type="button"
-                            aria-label="Remover item"
-                            onClick={() => handleRemoveRecipeItem(item.ingredientId)}
-                            className="text-zinc-500 hover:text-rose-400 p-1"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (draggedIngId) {
+                              handleReorderRecipeItem(
+                                draggedIngId,
+                                item.ingredientId,
+                                'alimento'
+                              );
+                            }
+                            setDraggedIngId(null);
+                            setDragOverIngId(null);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedIngId(null);
+                            setDragOverIngId(null);
+                          }}
+                          className={`transition-colors ${
+                            isDragging
+                              ? 'opacity-40 bg-orange-500/10'
+                              : isDragOver
+                              ? 'bg-orange-500/15 border-t border-orange-500'
+                              : 'hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <td className="py-2 px-3 text-zinc-200">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="cursor-grab active:cursor-grabbing text-zinc-500 hover:text-zinc-300"
+                                title="Arraste para cima ou para baixo"
+                              >
+                                <GripVertical className="size-4" />
+                              </span>
+                              <span>{item.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <input
+                              type="number"
+                              step="any"
+                              aria-label={`Quantidade de ${item.name}`}
+                              value={item.quantity}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onChange={(e) =>
+                                handleUpdateRecipeQty(
+                                  item.ingredientId,
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                              className="w-20 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-center text-zinc-100"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-center text-zinc-500">
+                            {item.usageUnit}
+                          </td>
+                          <td className="py-2 px-3 text-right text-zinc-400">
+                            {formatBRL(item.unitCost, 4)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-medium text-zinc-200">
+                            {formatBRL(item.subtotal)}
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            <div className="inline-flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                aria-label="Mover para cima"
+                                disabled={idx === 0}
+                                onClick={() =>
+                                  handleMoveRecipeStep(item.ingredientId, -1, 'alimento')
+                                }
+                                className="text-zinc-500 hover:text-zinc-200 disabled:opacity-25 p-1"
+                                title="Subir item"
+                              >
+                                <ArrowUp className="size-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Mover para baixo"
+                                disabled={idx === foodItems.length - 1}
+                                onClick={() =>
+                                  handleMoveRecipeStep(item.ingredientId, 1, 'alimento')
+                                }
+                                className="text-zinc-500 hover:text-zinc-200 disabled:opacity-25 p-1"
+                                title="Descer item"
+                              >
+                                <ArrowDown className="size-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Remover item"
+                                onClick={() => handleRemoveRecipeItem(item.ingredientId)}
+                                className="text-zinc-500 hover:text-rose-400 p-1"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -508,45 +652,126 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                         </td>
                       </tr>
                     ) : (
-                      packagingItems.map((item) => (
-                        <tr key={item.ingredientId} className="hover:bg-white/[0.02]">
-                          <td className="py-2 px-3 text-zinc-200">{item.name}</td>
-                          <td className="py-2 px-3 text-center">
-                            <input
-                              type="number"
-                              step="any"
-                              aria-label={`Quantidade de ${item.name}`}
-                              value={item.quantity}
-                              onChange={(e) =>
-                                handleUpdateRecipeQty(
-                                  item.ingredientId,
-                                  parseFloat(e.target.value) || 0
-                                )
+                      packagingItems.map((item, idx) => {
+                        const isDragging = draggedIngId === item.ingredientId;
+                        const isDragOver =
+                          dragOverIngId === item.ingredientId &&
+                          draggedIngId !== item.ingredientId;
+
+                        return (
+                          <tr
+                            key={item.ingredientId}
+                            draggable
+                            onDragStart={(e) => {
+                              setDraggedIngId(item.ingredientId);
+                              e.dataTransfer.effectAllowed = 'move';
+                            }}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = 'move';
+                              if (dragOverIngId !== item.ingredientId) {
+                                setDragOverIngId(item.ingredientId);
                               }
-                              className="w-20 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-center text-zinc-100"
-                            />
-                          </td>
-                          <td className="py-2 px-3 text-center text-zinc-500">
-                            {item.usageUnit}
-                          </td>
-                          <td className="py-2 px-3 text-right text-zinc-400">
-                            {formatBRL(item.unitCost, 2)}
-                          </td>
-                          <td className="py-2 px-3 text-right font-medium text-zinc-200">
-                            {formatBRL(item.subtotal)}
-                          </td>
-                          <td className="py-2 px-2 text-center">
-                            <button
-                              type="button"
-                              aria-label="Remover embalagem"
-                              onClick={() => handleRemoveRecipeItem(item.ingredientId)}
-                              className="text-zinc-500 hover:text-rose-400 p-1"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (draggedIngId) {
+                                handleReorderRecipeItem(
+                                  draggedIngId,
+                                  item.ingredientId,
+                                  'embalagem'
+                                );
+                              }
+                              setDraggedIngId(null);
+                              setDragOverIngId(null);
+                            }}
+                            onDragEnd={() => {
+                              setDraggedIngId(null);
+                              setDragOverIngId(null);
+                            }}
+                            className={`transition-colors ${
+                              isDragging
+                                ? 'opacity-40 bg-orange-500/10'
+                                : isDragOver
+                                ? 'bg-orange-500/15 border-t border-orange-500'
+                                : 'hover:bg-white/[0.02]'
+                            }`}
+                          >
+                            <td className="py-2 px-3 text-zinc-200">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="cursor-grab active:cursor-grabbing text-zinc-500 hover:text-zinc-300"
+                                  title="Arraste para cima ou para baixo"
+                                >
+                                  <GripVertical className="size-4" />
+                                </span>
+                                <span>{item.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <input
+                                type="number"
+                                step="any"
+                                aria-label={`Quantidade de ${item.name}`}
+                                value={item.quantity}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onChange={(e) =>
+                                  handleUpdateRecipeQty(
+                                    item.ingredientId,
+                                    parseFloat(e.target.value) || 0
+                                  )
+                                }
+                                className="w-20 bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2 py-1 text-center text-zinc-100"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center text-zinc-500">
+                              {item.usageUnit}
+                            </td>
+                            <td className="py-2 px-3 text-right text-zinc-400">
+                              {formatBRL(item.unitCost, 2)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-medium text-zinc-200">
+                              {formatBRL(item.subtotal)}
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <div className="inline-flex items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  aria-label="Mover para cima"
+                                  disabled={idx === 0}
+                                  onClick={() =>
+                                    handleMoveRecipeStep(item.ingredientId, -1, 'embalagem')
+                                  }
+                                  className="text-zinc-500 hover:text-zinc-200 disabled:opacity-25 p-1"
+                                  title="Subir item"
+                                >
+                                  <ArrowUp className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="Mover para baixo"
+                                  disabled={idx === packagingItems.length - 1}
+                                  onClick={() =>
+                                    handleMoveRecipeStep(item.ingredientId, 1, 'embalagem')
+                                  }
+                                  className="text-zinc-500 hover:text-zinc-200 disabled:opacity-25 p-1"
+                                  title="Descer item"
+                                >
+                                  <ArrowDown className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="Remover embalagem"
+                                  onClick={() => handleRemoveRecipeItem(item.ingredientId)}
+                                  className="text-zinc-500 hover:text-rose-400 p-1"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -570,7 +795,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                   <img
                     src={selectedProduct.imageUrl}
                     alt={selectedProduct.shortName}
-                    className="size-20 rounded-[10px] object-cover border border-orange-500/40 shrink-0 bg-black"
+                    className="size-20 rounded-[10px] object-contain border border-orange-500/40 shrink-0 bg-[#09090b]"
                   />
                 ) : (
                   <div className="size-20 rounded-[10px] bg-[#09090b] border border-dashed border-white/[0.15] flex flex-col items-center justify-center text-2xl shrink-0">
@@ -608,7 +833,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                     </button>
                   )}
                   <p className="text-[11px] text-zinc-500 leading-snug">
-                    A foto é cortada e otimizada automaticamente para o padrão iFood.
+                    A foto é exibida inteira no cardápio e amplia quando o cliente toca nela.
                   </p>
                 </div>
               </div>
