@@ -46,7 +46,12 @@ export function calculateProductMetrics(
     const unitCost = ing ? ing.packagePrice / (ing.packageContent || 1) : 0;
     const subtotal = item.quantity * unitCost;
 
-    if (item.group === 'embalagem' || ing?.category === 'Embalagem') {
+    const resolvedGroup: 'alimento' | 'embalagem' =
+      item.group === 'embalagem' || ing?.category === 'Embalagem'
+        ? 'embalagem'
+        : 'alimento';
+
+    if (resolvedGroup === 'embalagem') {
       packagingCost += subtotal;
     } else {
       foodCost += subtotal;
@@ -59,7 +64,7 @@ export function calculateProductMetrics(
       usageUnit: ing?.usageUnit ?? 'un',
       unitCost,
       subtotal,
-      group: item.group,
+      group: resolvedGroup,
     });
   }
 

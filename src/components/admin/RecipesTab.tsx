@@ -38,6 +38,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
   const [addIngId, setAddIngId] = useState<string>(state.ingredients[0]?.id || '');
   const [addQty, setAddQty] = useState<string>('30');
+  const [addGroupMode, setAddGroupMode] = useState<'auto' | 'alimento' | 'embalagem'>('auto');
   const [draggedIngId, setDraggedIngId] = useState<string | null>(null);
   const [dragOverIngId, setDragOverIngId] = useState<string | null>(null);
 
@@ -79,8 +80,18 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
     if (!ing) return;
 
     const qty = parseFloat(addQty) || 1;
+    const isPotinhoOrPackaging =
+      ing.category === 'Embalagem' ||
+      ing.name.toLowerCase().includes('potinho') ||
+      ing.name.toLowerCase().includes('maionese da casa');
     const group: RecipeItem['group'] =
-      ing.category === 'Embalagem' ? 'embalagem' : 'alimento';
+      addGroupMode === 'embalagem'
+        ? 'embalagem'
+        : addGroupMode === 'alimento'
+        ? 'alimento'
+        : isPotinhoOrPackaging
+        ? 'embalagem'
+        : 'alimento';
 
     onUpdateState((prev) => ({
       ...prev,
@@ -92,6 +103,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
           updated[existingIdx] = {
             ...updated[existingIdx],
             quantity: updated[existingIdx].quantity + qty,
+            group,
           };
           return { ...p, recipe: updated };
         }
@@ -194,6 +206,11 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
     const saco = state.ingredients.find((i) =>
       i.name.toLowerCase().includes('saco kraft')
     );
+    const potinhos = state.ingredients.filter(
+      (i) =>
+        i.name.toLowerCase().includes('potinho') ||
+        i.name.toLowerCase().includes('maionese da casa')
+    );
 
     onUpdateState((prev) => ({
       ...prev,
@@ -206,7 +223,36 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         if (saco && !nextRecipe.some((r) => r.ingredientId === saco.id)) {
           nextRecipe.push({ ingredientId: saco.id, quantity: 1, group: 'embalagem' });
         }
+        for (const pot of potinhos) {
+          if (!nextRecipe.some((r) => r.ingredientId === pot.id)) {
+            nextRecipe.push({ ingredientId: pot.id, quantity: 1, group: 'embalagem' });
+          }
+        }
         return { ...p, recipe: nextRecipe };
+      }),
+    }));
+  }
+
+  function handleReplicatePackagingToAllBurgers() {
+    if (!selectedProduct) return;
+    const ingMap = new Map(state.ingredients.map((i) => [i.id, i]));
+    const isPack = (r: RecipeItem) => {
+      const ing = ingMap.get(r.ingredientId);
+      return r.group === 'embalagem' || ing?.category === 'Embalagem';
+    };
+    const currentPackItems = selectedProduct.recipe
+      .filter((r) => isPack(r))
+      .map((r) => ({ ...r, group: 'embalagem' as const }));
+
+    onUpdateState((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => {
+        if (p.category !== 'Hambúrgueres') return p;
+        const foodOnly = p.recipe.filter((r) => !isPack(r));
+        return {
+          ...p,
+          recipe: [...foodOnly, ...currentPackItems.map((item) => ({ ...item }))],
+        };
       }),
     }));
   }
@@ -457,9 +503,25 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                   ))}
                 </select>
               </div>
-              <div className="w-full sm:w-32">
+              <div className="w-full sm:w-44">
                 <label className="text-xs text-zinc-400 block mb-1">
-                  Quantidade ({state.ingredients.find((i) => i.id === addIngId)?.usageUnit || 'un'})
+                  Seção na Ficha
+                </label>
+                <select
+                  value={addGroupMode}
+                  onChange={(e) =>
+                    setAddGroupMode(e.target.value as 'auto' | 'alimento' | 'embalagem')
+                  }
+                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-2.5 py-1.5 text-xs text-zinc-100"
+                >
+                  <option value="auto">Automático</option>
+                  <option value="alimento">Alimentos (Receita)</option>
+                  <option value="embalagem">Embalagens & Fixos</option>
+                </select>
+              </div>
+              <div className="w-full sm:w-28">
+                <label className="text-xs text-zinc-400 block mb-1">
+                  Qtd ({state.ingredients.find((i) => i.id === addIngId)?.usageUnit || 'un'})
                 </label>
                 <input
                   type="number"
@@ -626,11 +688,23 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
             {/* Packaging Table */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-medium text-zinc-300">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-zinc-300">
                 <span className="flex items-center gap-1.5">
-                  <Package className="size-3.5 text-zinc-400" /> Embalagens
+                  <Package className="size-3.5 text-zinc-400" /> Embalagens & Itens Fixos (ex: Potinho Maionese)
                 </span>
-                <span className="tabular-nums">Subtotal: {formatBRL(metrics.packagingCost)}</span>
+                <div className="flex items-center gap-3">
+                  {selectedProduct.category === 'Hambúrgueres' && packagingItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleReplicatePackagingToAllBurgers}
+                      className="text-[11px] px-2 py-0.5 rounded bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 border border-orange-500/30 transition"
+                      title="Copia esta lista de embalagens e acompanhamentos fixos para todos os hambúrgueres do cardápio"
+                    >
+                      Aplicar em Todos os Lanches
+                    </button>
+                  )}
+                  <span className="tabular-nums">Subtotal: {formatBRL(metrics.packagingCost)}</span>
+                </div>
               </div>
               <div className="overflow-x-auto border border-white/[0.08] rounded-[8px]">
                 <table className="w-full text-left text-xs tabular-nums">
