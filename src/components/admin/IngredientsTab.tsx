@@ -2,7 +2,16 @@
 
 import { formatBRL } from '@/lib/pricing';
 import { AppDatabaseState, Ingredient, IngredientCategory, UsageUnit } from '@/lib/types';
-import { History, Plus, Search, Trash2, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  History,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { todayLocal } from '@/lib/periods';
 
@@ -10,6 +19,15 @@ interface Props {
   state: AppDatabaseState;
   onUpdateState: (updater: (prev: AppDatabaseState) => AppDatabaseState) => void;
 }
+
+type SortField =
+  | 'category'
+  | 'name'
+  | 'purchasePackage'
+  | 'packagePrice'
+  | 'packageContent'
+  | 'usageUnit'
+  | 'unitCost';
 
 const CATEGORIES: IngredientCategory[] = [
   'Proteína',
@@ -28,6 +46,8 @@ export default function IngredientsTab({ state, onUpdateState }: Props) {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('Todas');
   const [selectedHistoryIng, setSelectedHistoryIng] = useState<Ingredient | null>(null);
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState<IngredientCategory>('Proteína');
@@ -36,8 +56,17 @@ export default function IngredientsTab({ state, onUpdateState }: Props) {
   const [packageContent, setPackageContent] = useState('1000');
   const [usageUnit, setUsageUnit] = useState<UsageUnit>('g');
 
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir(field === 'packagePrice' || field === 'unitCost' ? 'desc' : 'asc');
+    }
+  }
+
   const filteredIngredients = useMemo(() => {
-    return state.ingredients.filter((i) => {
+    const filtered = state.ingredients.filter((i) => {
       const matchesCat = filterCategory === 'Todas' || i.category === filterCategory;
       const matchesSearch =
         !search.trim() ||
@@ -45,7 +74,33 @@ export default function IngredientsTab({ state, onUpdateState }: Props) {
         i.category.toLowerCase().includes(search.toLowerCase());
       return matchesCat && matchesSearch;
     });
-  }, [state.ingredients, filterCategory, search]);
+
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'name') {
+        cmp = a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+      } else if (sortField === 'category') {
+        cmp =
+          a.category.localeCompare(b.category, 'pt-BR', { sensitivity: 'base' }) ||
+          a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+      } else if (sortField === 'purchasePackage') {
+        cmp = a.purchasePackage.localeCompare(b.purchasePackage, 'pt-BR', {
+          sensitivity: 'base',
+        });
+      } else if (sortField === 'usageUnit') {
+        cmp = a.usageUnit.localeCompare(b.usageUnit, 'pt-BR');
+      } else if (sortField === 'packagePrice') {
+        cmp = (a.packagePrice || 0) - (b.packagePrice || 0);
+      } else if (sortField === 'packageContent') {
+        cmp = (a.packageContent || 0) - (b.packageContent || 0);
+      } else if (sortField === 'unitCost') {
+        const unitA = (a.packagePrice || 0) / (a.packageContent || 1);
+        const unitB = (b.packagePrice || 0) / (b.packageContent || 1);
+        cmp = unitA - unitB;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [state.ingredients, filterCategory, search, sortField, sortDir]);
 
   function handleAddIngredient(e: React.FormEvent) {
     e.preventDefault();
@@ -239,15 +294,134 @@ export default function IngredientsTab({ state, onUpdateState }: Props) {
       <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs tabular-nums">
-            <thead className="bg-[#18181c] text-zinc-400 border-b border-white/[0.08]">
+            <thead className="bg-[#18181c] text-zinc-400 border-b border-white/[0.08] select-none">
               <tr>
-                <th className="py-3 px-4 font-medium">Categoria</th>
-                <th className="py-3 px-4 font-medium">Item / Insumo</th>
-                <th className="py-3 px-3 font-medium">Embalagem</th>
-                <th className="py-3 px-3 font-medium text-right">Preço Pago</th>
-                <th className="py-3 px-3 font-medium text-right">Conteúdo</th>
-                <th className="py-3 px-3 font-medium text-center">Unid.</th>
-                <th className="py-3 px-3 font-medium text-right">Custo Unitário</th>
+                <th
+                  onClick={() => toggleSort('category')}
+                  className="py-3 px-4 font-medium cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Categoria"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    Categoria
+                    {sortField === 'category' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort('name')}
+                  className="py-3 px-4 font-medium cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Ordem Alfabética"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    Item / Insumo
+                    {sortField === 'name' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort('purchasePackage')}
+                  className="py-3 px-3 font-medium cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Embalagem"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    Embalagem
+                    {sortField === 'purchasePackage' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort('packagePrice')}
+                  className="py-3 px-3 font-medium text-right cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Preço Pago"
+                >
+                  <span className="inline-flex items-center justify-end gap-1.5 w-full">
+                    Preço Pago
+                    {sortField === 'packagePrice' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort('packageContent')}
+                  className="py-3 px-3 font-medium text-right cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Conteúdo"
+                >
+                  <span className="inline-flex items-center justify-end gap-1.5 w-full">
+                    Conteúdo
+                    {sortField === 'packageContent' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort('usageUnit')}
+                  className="py-3 px-3 font-medium text-center cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Unidade"
+                >
+                  <span className="inline-flex items-center justify-center gap-1">
+                    Unid.
+                    {sortField === 'usageUnit' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort('unitCost')}
+                  className="py-3 px-3 font-medium text-right cursor-pointer hover:text-zinc-100 transition-colors"
+                  title="Clique para ordenar por Custo Unitário"
+                >
+                  <span className="inline-flex items-center justify-end gap-1.5 w-full">
+                    Custo Unitário
+                    {sortField === 'unitCost' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="size-3 text-orange-400" />
+                      ) : (
+                        <ArrowDown className="size-3 text-orange-400" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3 opacity-40" />
+                    )}
+                  </span>
+                </th>
                 <th className="py-3 px-3 font-medium text-center">Histórico</th>
               </tr>
             </thead>
