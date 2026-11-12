@@ -27,11 +27,19 @@ interface PublicMenuItem {
   id: string;
   name: string;
   description: string;
-  category: 'Hambúrgueres' | 'Bebidas' | 'Porções & Combos' | 'Sobremesas';
+  category:
+    | 'Hambúrgueres'
+    | 'Bebidas'
+    | 'Porções & Combos'
+    | 'Sobremesas'
+    | 'Acréscimos / Adicionais';
   imageEmoji: string;
   imageUrl?: string | null;
   price: number;
   featured: boolean;
+  menuStatus?: 'disponivel' | 'em_breve' | 'esgotado';
+  trackStock?: boolean;
+  stockQty?: number | null;
 }
 
 interface PublicStoreInfo {
@@ -43,6 +51,7 @@ interface PublicStoreInfo {
   pixKey: string;
   pixBeneficiary: string;
   whatsappNumber: string;
+  dailyBurgerLimit?: number | null;
 }
 
 interface RecognizedCustomer {
@@ -91,14 +100,26 @@ export default function CardapioVirtualPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Cart: productId -> { quantity, notes }
-  const [cart, setCart] = useState<Record<string, { quantity: number; notes: string }>>({});
+  // Cart: productId -> { quantity, notes, addons }
+  const [cart, setCart] = useState<
+    Record<
+      string,
+      {
+        quantity: number;
+        notes: string;
+        addons?: { productId: string; quantity: number }[];
+      }
+    >
+  >({});
   const [bagOpen, setBagOpen] = useState(false);
 
-  // Selected product modal (iFood style detail modal + drink upsell)
+  // Selected product modal (2-Step Flow: Step 1 = Burger + Add-ons + Notes, Step 2 = Fries & Drink Upsell)
   const [detailItem, setDetailItem] = useState<PublicMenuItem | null>(null);
+  const [detailStep, setDetailStep] = useState<1 | 2>(1);
   const [detailQty, setDetailQty] = useState<number>(1);
   const [detailNotes, setDetailNotes] = useState<string>('');
+  const [detailAddons, setDetailAddons] = useState<Record<string, number>>({});
+  const [selectedUpsellPortionIds, setSelectedUpsellPortionIds] = useState<string[]>([]);
   const [selectedUpsellDrinkIds, setSelectedUpsellDrinkIds] = useState<string[]>([]);
   const [zoomPhotoItem, setZoomPhotoItem] = useState<PublicMenuItem | null>(null);
 
@@ -250,9 +271,21 @@ export default function CardapioVirtualPage() {
   }
 
   function addToCart(productId: string, delta: number, customNotes?: string) {
+    const targetItem = menu.find((m) => m.id === productId);
+    if (
+      delta > 0 &&
+      targetItem &&
+      (targetItem.menuStatus === 'em_breve' || targetItem.menuStatus === 'esgotado')
+    ) {
+      return;
+    }
     setCart((prev) => {
       const current = prev[productId]?.quantity || 0;
-      const nextQty = Math.max(0, current + delta);
+      const maxStock =
+        targetItem?.trackStock && typeof targetItem.stockQty === 'number'
+          ? targetItem.stockQty
+          : 50;
+      const nextQty = Math.min(maxStock, Math.max(0, current + delta));
       if (nextQty === 0) {
         const clone = { ...prev };
         delete clone[productId];
@@ -263,6 +296,7 @@ export default function CardapioVirtualPage() {
         [productId]: {
           quantity: nextQty,
           notes: customNotes !== undefined ? customNotes : prev[productId]?.notes || '',
+          addons: prev[productId]?.addons,
         },
       };
     });
@@ -270,10 +304,36 @@ export default function CardapioVirtualPage() {
 
   function openProductDetail(item: PublicMenuItem) {
     setDetailItem(item);
+    setDetailStep(1);
     const existing = cart[item.id];
     setDetailQty(existing ? existing.quantity : 1);
     setDetailNotes(existing ? existing.notes : '');
+    const initAddons: Record<string, number> = {};
+    if (existing?.addons) {
+      for (const a of existing.addons) {
+        initAddons[a.productId] = a.quantity;
+      }
+    }
+    setDetailAddons(initAddons);
+    setSelectedUpsellPortionIds([]);
     setSelectedUpsellDrinkIds([]);
+  }
+
+  function updateModalAddonQty(addonId: string, delta: number) {
+    setDetailAddons((prev) => {
+      const cur = prev[addonId] || 0;
+      const next = Math.min(5, Math.max(0, cur + delta));
+      const clone = { ...prev };
+      if (next === 0) delete clone[addonId];
+      else clone[addonId] = next;
+      return clone;
+    });
+  }
+
+  function toggleUpsellPortionInModal(portionId: string) {
+    setSelectedUpsellPortionIds((prev) =>
+      prev.includes(portionId) ? prev.filter((id) => id !== portionId) : [...prev, portionId]
+    );
   }
 
   function toggleUpsellDrinkInModal(drinkId: string) {
@@ -284,18 +344,37 @@ export default function CardapioVirtualPage() {
 
   function confirmProductDetail() {
     if (!detailItem) return;
+    const status = detailItem.menuStatus || 'disponivel';
+    if (status === 'em_breve' || status === 'esgotado') {
+      setDetailItem(null);
+      return;
+    }
+
+    const formattedAddons = Object.entries(detailAddons)
+      .filter(([, q]) => q > 0)
+      .map(([productId, quantity]) => ({ productId, quantity }));
+
     setCart((prev) => {
       const next = {
         ...prev,
         [detailItem.id]: {
           quantity: detailQty,
           notes: detailNotes.trim(),
+          addons: formattedAddons.length > 0 ? formattedAddons : undefined,
         },
       };
+      for (const portionId of selectedUpsellPortionIds) {
+        next[portionId] = {
+          quantity: (next[portionId]?.quantity || 0) + 1,
+          notes: next[portionId]?.notes || '',
+          addons: next[portionId]?.addons,
+        };
+      }
       for (const drinkId of selectedUpsellDrinkIds) {
         next[drinkId] = {
           quantity: (next[drinkId]?.quantity || 0) + 1,
           notes: next[drinkId]?.notes || '',
+          addons: next[drinkId]?.addons,
         };
       }
       return next;
@@ -303,19 +382,80 @@ export default function CardapioVirtualPage() {
     setDetailItem(null);
   }
 
+  // Separate burger add-ons from standalone menu items
+  const addonsInMenu = useMemo(
+    () =>
+      menu.filter(
+        (m) =>
+          m.category === 'Acréscimos / Adicionais' &&
+          (m.menuStatus || 'disponivel') === 'disponivel'
+      ),
+    [menu]
+  );
+
+  const standaloneMenu = useMemo(
+    () => menu.filter((m) => m.category !== 'Acréscimos / Adicionais'),
+    [menu]
+  );
+
+  const portionsInMenu = useMemo(
+    () => standaloneMenu.filter((m) => m.category === 'Porções & Combos'),
+    [standaloneMenu]
+  );
+
+  const drinksInMenu = useMemo(
+    () =>
+      standaloneMenu.filter(
+        (m) => m.category === 'Bebidas' && (m.menuStatus || 'disponivel') === 'disponivel'
+      ),
+    [standaloneMenu]
+  );
+
   const cartItemsList = useMemo(() => {
     return Object.entries(cart)
       .map(([productId, info]) => {
         const item = menu.find((m) => m.id === productId);
         if (!item) return null;
+        const addonsDetailed = (info.addons || [])
+          .map((a) => {
+            const addonProd = menu.find((m) => m.id === a.productId);
+            if (!addonProd || a.quantity <= 0) return null;
+            return {
+              productId: addonProd.id,
+              name: addonProd.name,
+              quantity: a.quantity,
+              unitPrice: addonProd.price,
+            };
+          })
+          .filter(Boolean) as {
+          productId: string;
+          name: string;
+          quantity: number;
+          unitPrice: number;
+        }[];
+
+        const addonsUnitSum = addonsDetailed.reduce(
+          (acc, a) => acc + a.unitPrice * a.quantity,
+          0
+        );
+        const unitPriceWithAddons = item.price + addonsUnitSum;
+
         return {
           ...item,
           quantity: info.quantity,
           notes: info.notes,
-          subtotal: item.price * info.quantity,
+          addons: addonsDetailed,
+          unitPriceWithAddons,
+          subtotal: unitPriceWithAddons * info.quantity,
         };
       })
-      .filter(Boolean) as (PublicMenuItem & { quantity: number; notes: string; subtotal: number })[];
+      .filter(Boolean) as (PublicMenuItem & {
+      quantity: number;
+      notes: string;
+      addons: { productId: string; name: string; quantity: number; unitPrice: number }[];
+      unitPriceWithAddons: number;
+      subtotal: number;
+    })[];
   }, [cart, menu]);
 
   const totalCartItems = cartItemsList.reduce((acc, i) => acc + i.quantity, 0);
@@ -323,17 +463,27 @@ export default function CardapioVirtualPage() {
   const deliveryFee = store?.deliveryFeeDefault || 0;
   const totalOrderAmount = subtotalAmount + deliveryFee;
 
-  // Smart Upsell Logic
-  const drinksInMenu = useMemo(
-    () => menu.filter((m) => m.category === 'Bebidas'),
-    [menu]
-  );
+  // Smart Upsell Logic in Bag
   const hasDrinkInCart = useMemo(
     () => cartItemsList.some((i) => i.category === 'Bebidas'),
     [cartItemsList]
   );
+  const hasPortionInCart = useMemo(
+    () => cartItemsList.some((i) => i.category === 'Porções & Combos'),
+    [cartItemsList]
+  );
   const upsellSuggestionsInBag = useMemo(() => {
     const inCartIds = new Set(cartItemsList.map((i) => i.id));
+    const availablePortions = portionsInMenu.filter(
+      (p) => (p.menuStatus || 'disponivel') === 'disponivel' && !inCartIds.has(p.id)
+    );
+    if (!hasPortionInCart && availablePortions.length > 0) {
+      return {
+        title: '🍟 Vai uma Batata Frita crocante para acompanhar?',
+        subtitle: 'Adicione na sua sacola com 1 toque:',
+        items: availablePortions.slice(0, 3),
+      };
+    }
     if (!hasDrinkInCart && drinksInMenu.length > 0) {
       return {
         title: '🥤 Vai uma bebida gelada para acompanhar seu lanche?',
@@ -341,7 +491,9 @@ export default function CardapioVirtualPage() {
         items: drinksInMenu.filter((d) => !inCartIds.has(d.id)).slice(0, 3),
       };
     }
-    const extraSuggestions = menu.filter((m) => !inCartIds.has(m.id));
+    const extraSuggestions = standaloneMenu.filter(
+      (m) => (m.menuStatus || 'disponivel') === 'disponivel' && !inCartIds.has(m.id)
+    );
     if (extraSuggestions.length > 0) {
       return {
         title: '🔥 Aproveite a entrega e adicione também:',
@@ -350,20 +502,20 @@ export default function CardapioVirtualPage() {
       };
     }
     return null;
-  }, [cartItemsList, hasDrinkInCart, drinksInMenu, menu]);
+  }, [cartItemsList, hasPortionInCart, hasDrinkInCart, portionsInMenu, drinksInMenu, standaloneMenu]);
 
   const featuredItems = useMemo(
-    () => menu.filter((m) => m.featured),
-    [menu]
+    () => standaloneMenu.filter((m) => m.featured && (m.menuStatus || 'disponivel') !== 'esgotado'),
+    [standaloneMenu]
   );
 
   const categories = useMemo(() => {
-    const cats = Array.from(new Set(menu.map((m) => m.category)));
+    const cats = Array.from(new Set(standaloneMenu.map((m) => m.category)));
     return ['Todos', ...cats];
-  }, [menu]);
+  }, [standaloneMenu]);
 
   const filteredMenu = useMemo(() => {
-    return menu.filter((m) => {
+    return standaloneMenu.filter((m) => {
       const matchCat = selectedCategory === 'Todos' || m.category === selectedCategory;
       const matchSearch =
         !searchTerm.trim() ||
@@ -371,16 +523,22 @@ export default function CardapioVirtualPage() {
         m.description.toLowerCase().includes(searchTerm.toLowerCase());
       return matchCat && matchSearch;
     });
-  }, [menu, selectedCategory, searchTerm]);
+  }, [standaloneMenu, selectedCategory, searchTerm]);
 
   function buildWhatsAppOrderLink(order: CompletedOrderDetails) {
     const itemsLines = order.items
-      .map(
-        (it) =>
-          `• *${it.quantity}x ${it.productName}* — ${formatBRL(it.unitPrice * it.quantity)}${
-            it.notes ? `\n   _Obs: ${it.notes}_` : ''
-          }`
-      )
+      .map((it) => {
+        const addonsText =
+          it.addons && it.addons.length > 0
+            ? `\n   _Acréscimos: ${it.addons
+                .map((a) => `+${a.quantity}x ${a.name} (${formatBRL(a.unitPrice * a.quantity)})`)
+                .join(', ')}_`
+            : '';
+        const notesText = it.notes ? `\n   _Obs: ${it.notes}_` : '';
+        return `• *${it.quantity}x ${it.productName}* — ${formatBRL(
+          it.unitPrice * it.quantity
+        )}${addonsText}${notesText}`;
+      })
       .join('\n');
 
     const addressLine = `${order.deliveryAddress.street}, ${order.deliveryAddress.number} - ${
@@ -451,6 +609,10 @@ export default function CardapioVirtualPage() {
             productId: i.id,
             quantity: i.quantity,
             notes: i.notes,
+            addons:
+              i.addons && i.addons.length > 0
+                ? i.addons.map((a) => ({ productId: a.productId, quantity: a.quantity }))
+                : undefined,
           })),
           paymentMethod,
           changeFor: paymentMethod === 'Dinheiro' ? changeFor : undefined,
@@ -482,10 +644,22 @@ export default function CardapioVirtualPage() {
     );
   }
 
-  const modalUpsellTotal = selectedUpsellDrinkIds.reduce((acc, id) => {
+  const modalAddonsUnitTotal = Object.entries(detailAddons).reduce((acc, [id, q]) => {
+    const a = menu.find((m) => m.id === id);
+    return acc + (a ? a.price * q : 0);
+  }, 0);
+
+  const modalUpsellPortionsTotal = selectedUpsellPortionIds.reduce((acc, id) => {
+    const p = menu.find((m) => m.id === id);
+    return acc + (p ? p.price : 0);
+  }, 0);
+
+  const modalUpsellDrinksTotal = selectedUpsellDrinkIds.reduce((acc, id) => {
     const d = menu.find((m) => m.id === id);
     return acc + (d ? d.price : 0);
   }, 0);
+
+  const modalUpsellTotal = modalUpsellPortionsTotal + modalUpsellDrinksTotal;
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 pb-28">
@@ -530,6 +704,12 @@ export default function CardapioVirtualPage() {
                     <div>
                       <span className="font-semibold text-zinc-100">{it.quantity}x</span>{' '}
                       {it.productName}
+                      {it.addons && it.addons.length > 0 && (
+                        <span className="block text-[11px] text-emerald-400">
+                          + Acréscimos:{' '}
+                          {it.addons.map((a) => `${a.quantity}x ${a.name}`).join(', ')}
+                        </span>
+                      )}
                       {it.notes && (
                         <span className="block text-[11px] text-orange-400 italic">
                           Obs: {it.notes}
@@ -777,11 +957,20 @@ export default function CardapioVirtualPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {featuredItems.slice(0, 4).map((item) => {
                 const qtyInCart = cart[item.id]?.quantity || 0;
+                const status = item.menuStatus || 'disponivel';
+                const isComingSoon = status === 'em_breve';
+                const isSoldOut = status === 'esgotado';
                 return (
                   <div
                     key={`feat-${item.id}`}
                     onClick={() => openProductDetail(item)}
-                    className="bg-[#121215] border border-white/[0.08] hover:border-orange-500/40 rounded-[12px] overflow-hidden flex flex-col justify-between cursor-pointer group transition shadow-md"
+                    className={`bg-[#121215] border rounded-[12px] overflow-hidden flex flex-col justify-between cursor-pointer group transition shadow-md ${
+                      isSoldOut
+                        ? 'border-white/[0.05] opacity-60'
+                        : isComingSoon
+                        ? 'border-amber-500/35 hover:border-amber-500/60'
+                        : 'border-white/[0.08] hover:border-orange-500/40'
+                    }`}
                   >
                     <div>
                       <div
@@ -803,9 +992,15 @@ export default function CardapioVirtualPage() {
                         ) : (
                           <span>{item.imageEmoji}</span>
                         )}
-                        <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/80 text-amber-400 border border-amber-500/30 backdrop-blur-sm">
-                          ★ Top Vendas
-                        </span>
+                        {isComingSoon ? (
+                          <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-black shadow-md">
+                            🔥 Em Breve
+                          </span>
+                        ) : (
+                          <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/80 text-amber-400 border border-amber-500/30 backdrop-blur-sm">
+                            ★ Top Vendas
+                          </span>
+                        )}
                       </div>
                       <div className="p-3 space-y-1">
                         <h3 className="text-xs font-bold text-zinc-100 line-clamp-1 group-hover:text-orange-400 transition-colors">
@@ -824,13 +1019,19 @@ export default function CardapioVirtualPage() {
                       <span className="text-xs font-bold text-zinc-100 tabular-nums">
                         {formatBRL(item.price)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => openProductDetail(item)}
-                        className="px-2.5 py-1 rounded-[6px] bg-[#ff5400] hover:bg-[#ea4b00] text-white text-[11px] font-semibold transition"
-                      >
-                        {qtyInCart > 0 ? `${qtyInCart} na sacola` : '+ Pedir'}
-                      </button>
+                      {isComingSoon ? (
+                        <span className="px-2 py-1 rounded-[6px] bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                          🔥 Em Breve
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openProductDetail(item)}
+                          className="px-2.5 py-1 rounded-[6px] bg-[#ff5400] hover:bg-[#ea4b00] text-white text-[11px] font-semibold transition"
+                        >
+                          {qtyInCart > 0 ? `${qtyInCart} na sacola` : '+ Pedir'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -841,19 +1042,44 @@ export default function CardapioVirtualPage() {
 
         {/* iFood-Style Product Cards List */}
         <div className="space-y-3">
-          <h2 className="text-sm font-bold text-zinc-200">
-            {selectedCategory === 'Todos' ? 'Cardápio Completo' : selectedCategory}
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-zinc-200">
+              {selectedCategory === 'Todos' ? 'Cardápio Completo' : selectedCategory}
+            </h2>
+            {typeof store?.dailyBurgerLimit === 'number' &&
+              store.dailyBurgerLimit > 0 &&
+              store.dailyBurgerLimit <= 12 && (
+                <span className="px-2.5 py-0.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-[11px] font-semibold text-orange-300">
+                  🔥 Restam {store.dailyBurgerLimit} hambúrgueres na fornada de hoje!
+                </span>
+              )}
+          </div>
 
           {filteredMenu.map((item) => {
             const qtyInCart = cart[item.id]?.quantity || 0;
             const itemNote = cart[item.id]?.notes || '';
+            const itemAddons = cart[item.id]?.addons || [];
+            const status = item.menuStatus || 'disponivel';
+            const isComingSoon = status === 'em_breve';
+            const isSoldOut = status === 'esgotado';
+            const lowStock =
+              status === 'disponivel' &&
+              item.trackStock &&
+              typeof item.stockQty === 'number' &&
+              item.stockQty > 0 &&
+              item.stockQty <= 5;
 
             return (
               <div
                 key={item.id}
                 onClick={() => openProductDetail(item)}
-                className="bg-[#121215] border border-white/[0.08] hover:border-orange-500/30 rounded-[12px] p-4 flex items-center justify-between gap-4 transition cursor-pointer group"
+                className={`bg-[#121215] border rounded-[12px] p-4 flex items-center justify-between gap-4 transition cursor-pointer group ${
+                  isSoldOut
+                    ? 'border-white/[0.05] opacity-60'
+                    : isComingSoon
+                    ? 'border-amber-500/35 hover:border-amber-500/60'
+                    : 'border-white/[0.08] hover:border-orange-500/30'
+                }`}
               >
                 {/* Left: Product Information */}
                 <div className="space-y-1.5 flex-1 pr-2">
@@ -861,7 +1087,22 @@ export default function CardapioVirtualPage() {
                     <h3 className="text-sm font-semibold text-zinc-100 group-hover:text-orange-400 transition-colors">
                       {item.name}
                     </h3>
-                    {item.featured && (
+                    {isComingSoon && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-black bg-amber-400 shadow-sm">
+                        🔥 EM BREVE
+                      </span>
+                    )}
+                    {isSoldOut && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-red-300 bg-red-500/20 border border-red-500/30">
+                        Esgotado Hoje
+                      </span>
+                    )}
+                    {lowStock && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-orange-300 bg-orange-500/15 border border-orange-500/30">
+                        🔥 Restam {item.stockQty} un!
+                      </span>
+                    )}
+                    {item.featured && !isComingSoon && !isSoldOut && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20">
                         Mais Pedido
                       </span>
@@ -870,6 +1111,18 @@ export default function CardapioVirtualPage() {
                   <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
                     {item.description}
                   </p>
+                  {itemAddons.length > 0 && (
+                    <p className="text-[11px] text-emerald-400 font-medium">
+                      + Acréscimos:{' '}
+                      {itemAddons
+                        .map((a) => {
+                          const ap = menu.find((m) => m.id === a.productId);
+                          return ap ? `${a.quantity}x ${ap.name}` : '';
+                        })
+                        .filter(Boolean)
+                        .join(', ')}
+                    </p>
+                  )}
                   {itemNote && (
                     <p className="text-[11px] text-orange-400/90 italic">
                       Obs: {itemNote}
@@ -907,7 +1160,15 @@ export default function CardapioVirtualPage() {
                     )}
                   </div>
 
-                  {qtyInCart > 0 ? (
+                  {isComingSoon ? (
+                    <span className="px-2.5 py-1 rounded-[6px] bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-bold">
+                      🔥 Em Breve
+                    </span>
+                  ) : isSoldOut ? (
+                    <span className="px-2.5 py-1 rounded-[6px] bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-semibold">
+                      Esgotado
+                    </span>
+                  ) : qtyInCart > 0 ? (
                     <div className="flex items-center gap-1.5 bg-[#18181c] border border-white/[0.12] rounded-[6px] p-0.5">
                       <button
                         type="button"
@@ -945,7 +1206,9 @@ export default function CardapioVirtualPage() {
         </div>
       </main>
 
-      {/* iFood-Style Product Detail Modal + Built-In Drink Upsell */}
+      {/* iFood-Style 2-Step Product Detail Modal:
+          Step 1: Burger Customization (Add-ons + Notes + Quantity)
+          Step 2: Dedicated Upsell (Batata Frita + Bebida Gelada, including "Em Breve" special fries) */}
       {detailItem && (
         <div
           className="fixed inset-0 bg-black/75 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -955,150 +1218,448 @@ export default function CardapioVirtualPage() {
             className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              onClick={() => {
-                if (detailItem.imageUrl) {
-                  setZoomPhotoItem(detailItem);
-                }
-              }}
-              className={`relative min-h-[14rem] max-h-80 bg-[#09090b] flex items-center justify-center ${
-                detailItem.imageUrl ? 'cursor-zoom-in' : ''
-              }`}
-              title={detailItem.imageUrl ? 'Toque para ver a foto em tela cheia' : undefined}
-            >
-              {detailItem.imageUrl ? (
-                <img
-                  src={detailItem.imageUrl}
-                  alt={detailItem.name}
-                  className="w-full max-h-80 object-contain"
-                />
-              ) : (
-                <span className="text-6xl">{detailItem.imageEmoji}</span>
-              )}
-              <button
-                type="button"
-                aria-label="Fechar detalhes"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDetailItem(null);
-                }}
-                className="absolute top-3 right-3 size-8 rounded-full bg-black/70 text-zinc-200 hover:text-white flex items-center justify-center"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-base font-bold text-zinc-100">{detailItem.name}</h3>
-                  <span className="text-base font-bold text-orange-400 tabular-nums shrink-0">
-                    {formatBRL(detailItem.price)}
-                  </span>
+            {detailStep === 1 ? (
+              <>
+                <div
+                  onClick={() => {
+                    if (detailItem.imageUrl) {
+                      setZoomPhotoItem(detailItem);
+                    }
+                  }}
+                  className={`relative min-h-[14rem] max-h-80 bg-[#09090b] flex items-center justify-center ${
+                    detailItem.imageUrl ? 'cursor-zoom-in' : ''
+                  }`}
+                  title={detailItem.imageUrl ? 'Toque para ver a foto em tela cheia' : undefined}
+                >
+                  {detailItem.imageUrl ? (
+                    <img
+                      src={detailItem.imageUrl}
+                      alt={detailItem.name}
+                      className="w-full max-h-80 object-contain"
+                    />
+                  ) : (
+                    <span className="text-6xl">{detailItem.imageEmoji}</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Fechar detalhes"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDetailItem(null);
+                    }}
+                    className="absolute top-3 right-3 size-8 rounded-full bg-black/70 text-zinc-200 hover:text-white flex items-center justify-center"
+                  >
+                    <X className="size-4" />
+                  </button>
                 </div>
-                <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
-                  {detailItem.description}
-                </p>
-              </div>
 
-              {/* Estratégia de Upsell Direto ao Escolher um Lanche */}
-              {detailItem.category === 'Hambúrgueres' && drinksInMenu.length > 0 && (
-                <div className="bg-[#18181c] border border-orange-500/25 rounded-[10px] p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
-                      <Sparkles className="size-3.5 text-orange-400" />
-                      Vai uma bebida gelada para acompanhar?
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">
-                      Opcional
-                    </span>
+                <div className="p-5 space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-base font-bold text-zinc-100">{detailItem.name}</h3>
+                      <span className="text-base font-bold text-orange-400 tabular-nums shrink-0">
+                        {formatBRL(detailItem.price)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
+                      {detailItem.description}
+                    </p>
                   </div>
-                  <div className="space-y-1.5">
-                    {drinksInMenu.map((drink) => {
-                      const checked = selectedUpsellDrinkIds.includes(drink.id);
-                      return (
-                        <label
-                          key={drink.id}
-                          className={`flex items-center justify-between p-2 rounded-[8px] border cursor-pointer transition text-xs ${
-                            checked
-                              ? 'bg-orange-500/10 border-orange-500/50 text-zinc-100'
-                              : 'bg-[#09090b] border-white/[0.06] text-zinc-300 hover:border-white/[0.15]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleUpsellDrinkInModal(drink.id)}
-                              className="accent-[#ff5400]"
-                            />
-                            {drink.imageUrl ? (
-                              <img
-                                src={drink.imageUrl}
-                                alt={drink.name}
-                                className="size-7 rounded object-cover"
-                              />
-                            ) : (
-                              <span>{drink.imageEmoji}</span>
-                            )}
-                            <span className="font-medium">{drink.name}</span>
+
+                  {/* Step 1: Burger Add-ons ("Turbine seu Burger") */}
+                  {detailItem.category === 'Hambúrgueres' &&
+                    (detailItem.menuStatus || 'disponivel') === 'disponivel' &&
+                    addonsInMenu.length > 0 && (
+                      <div className="bg-[#18181c] border border-orange-500/25 rounded-[10px] p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                              🧀 Deseja algum acréscimo no seu lanche?
+                            </span>
+                            <p className="text-[11px] text-zinc-400">
+                              Turbine seu hambúrguer com ingredientes extras:
+                            </p>
                           </div>
-                          <span className="font-semibold text-orange-400 tabular-nums">
-                            + {formatBRL(drink.price)}
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">
+                            Opcional
                           </span>
-                        </label>
-                      );
-                    })}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {addonsInMenu.map((addon) => {
+                            const addonQty = detailAddons[addon.id] || 0;
+                            return (
+                              <div
+                                key={addon.id}
+                                className={`flex items-center justify-between p-2.5 rounded-[8px] border transition text-xs ${
+                                  addonQty > 0
+                                    ? 'bg-orange-500/10 border-orange-500/50 text-zinc-100'
+                                    : 'bg-[#09090b] border-white/[0.06] text-zinc-300'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                                  <span className="text-base shrink-0">{addon.imageEmoji || '🧀'}</span>
+                                  <div className="truncate">
+                                    <p className="font-medium text-zinc-100 truncate">
+                                      {addon.name}
+                                    </p>
+                                    <p className="text-[11px] font-semibold text-orange-400 tabular-nums">
+                                      + {formatBRL(addon.price)}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {addonQty > 0 ? (
+                                    <div className="flex items-center gap-1.5 bg-[#121215] border border-orange-500/40 rounded-[6px] p-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateModalAddonQty(addon.id, -1)}
+                                        className="size-6 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
+                                      >
+                                        <Minus className="size-3" />
+                                      </button>
+                                      <span className="w-5 text-center text-xs font-bold text-orange-400 tabular-nums">
+                                        {addonQty}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateModalAddonQty(addon.id, 1)}
+                                        className="size-6 rounded bg-[#ff5400] text-white flex items-center justify-center"
+                                      >
+                                        <Plus className="size-3" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateModalAddonQty(addon.id, 1)}
+                                      className="px-2.5 py-1 rounded-[6px] bg-[#121215] hover:bg-[#ff5400] hover:text-white border border-white/[0.1] text-zinc-200 text-[11px] font-medium flex items-center gap-1 transition"
+                                    >
+                                      <Plus className="size-3" /> Adicionar
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                  {(detailItem.menuStatus || 'disponivel') === 'disponivel' && (
+                    <div>
+                      <label className="text-xs text-zinc-300 font-medium block mb-1.5">
+                        Alguma observação neste item?
+                      </label>
+                      <input
+                        type="text"
+                        value={detailNotes}
+                        onChange={(e) => setDetailNotes(e.target.value)}
+                        placeholder="Ex: Sem cebola, ponto bem passado, maionese à parte..."
+                        className="w-full bg-[#09090b] border border-white/[0.1] rounded-[8px] px-3 py-2 text-xs text-zinc-100 outline-none focus:border-orange-500"
+                      />
+                    </div>
+                  )}
+
+                  {detailItem.menuStatus === 'em_breve' ? (
+                    <div className="bg-amber-500/15 border border-amber-500/35 rounded-[10px] p-3.5 text-center space-y-1">
+                      <p className="text-xs font-bold text-amber-300">
+                        🔥 Novidade chegando em breve no cardápio!
+                      </p>
+                      <p className="text-[11px] text-zinc-400">
+                        Estamos preparando essa novidade especial para você. Fique ligado!
+                      </p>
+                    </div>
+                  ) : detailItem.menuStatus === 'esgotado' ? (
+                    <div className="bg-red-500/15 border border-red-500/35 rounded-[10px] p-3.5 text-center space-y-1">
+                      <p className="text-xs font-bold text-red-300">
+                        🚫 Item esgotado na fornada de hoje
+                      </p>
+                      <p className="text-[11px] text-zinc-400">
+                        Todas as unidades deste item já foram vendidas hoje. Escolha outro item delicioso do cardápio!
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 pt-1">
+                      <div className="flex items-center gap-2 bg-[#18181c] border border-white/[0.12] rounded-[8px] p-1">
+                        <button
+                          type="button"
+                          onClick={() => setDetailQty((q) => Math.max(1, q - 1))}
+                          className="size-8 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
+                        >
+                          <Minus className="size-3.5" />
+                        </button>
+                        <span className="w-6 text-center text-xs font-bold text-zinc-100 tabular-nums">
+                          {detailQty}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDetailQty((q) => {
+                              const max =
+                                detailItem.trackStock && typeof detailItem.stockQty === 'number'
+                                  ? detailItem.stockQty
+                                  : 50;
+                              return Math.min(max, q + 1);
+                            })
+                          }
+                          className="size-8 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
+                        >
+                          <Plus className="size-3.5" />
+                        </button>
+                      </div>
+
+                      {detailItem.category === 'Hambúrgueres' &&
+                      (portionsInMenu.length > 0 || drinksInMenu.length > 0) ? (
+                        <button
+                          type="button"
+                          onClick={() => setDetailStep(2)}
+                          className="flex-1 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center justify-between px-4 shadow-lg shadow-orange-500/25 transition"
+                        >
+                          <span className="flex items-center gap-1">
+                            Continuar <ChevronRight className="size-4" />
+                          </span>
+                          <span className="tabular-nums font-bold">
+                            {formatBRL((detailItem.price + modalAddonsUnitTotal) * detailQty)}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={confirmProductDetail}
+                          className="flex-1 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center justify-between px-4 shadow-lg shadow-orange-500/25 transition"
+                        >
+                          <span>Adicionar à Sacola</span>
+                          <span className="tabular-nums font-bold">
+                            {formatBRL((detailItem.price + modalAddonsUnitTotal) * detailQty)}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* STEP 2: Dedicated Upsell Screen (Batata Frita + Bebida Gelada) */
+              <div className="p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400">
+                      Etapa 2 de 2 • Complete seu Pedido
+                    </span>
+                    <h3 className="text-base font-bold text-zinc-100 mt-0.5">
+                      Acompanhamento & Bebida Gelada
+                    </h3>
                   </div>
-                </div>
-              )}
-
-              <div>
-                <label className="text-xs text-zinc-300 font-medium block mb-1.5">
-                  Alguma observação neste item?
-                </label>
-                <input
-                  type="text"
-                  value={detailNotes}
-                  onChange={(e) => setDetailNotes(e.target.value)}
-                  placeholder="Ex: Sem cebola, ponto bem passado, maionese à parte..."
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[8px] px-3 py-2 text-xs text-zinc-100 outline-none focus:border-orange-500"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 pt-1">
-                <div className="flex items-center gap-2 bg-[#18181c] border border-white/[0.12] rounded-[8px] p-1">
                   <button
                     type="button"
-                    onClick={() => setDetailQty((q) => Math.max(1, q - 1))}
-                    className="size-8 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
+                    onClick={() => setDetailStep(1)}
+                    className="px-2.5 py-1 rounded-[6px] bg-[#18181c] border border-white/[0.1] text-xs text-zinc-300 hover:text-white"
                   >
-                    <Minus className="size-3.5" />
+                    ← Voltar ao lanche
                   </button>
-                  <span className="w-6 text-center text-xs font-bold text-zinc-100 tabular-nums">
-                    {detailQty}
+                </div>
+
+                {/* Resumo rápido do lanche configurado na Etapa 1 */}
+                <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-3 flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-semibold text-zinc-100">
+                      {detailQty}x {detailItem.name}
+                    </p>
+                    {Object.keys(detailAddons).length > 0 && (
+                      <p className="text-[11px] text-emerald-400">
+                        +{' '}
+                        {Object.entries(detailAddons)
+                          .map(([id, q]) => {
+                            const ap = menu.find((m) => m.id === id);
+                            return ap ? `${q}x ${ap.name}` : '';
+                          })
+                          .filter(Boolean)
+                          .join(', ')}
+                      </p>
+                    )}
+                    {detailNotes && (
+                      <p className="text-[11px] text-orange-400 italic">Obs: {detailNotes}</p>
+                    )}
+                  </div>
+                  <span className="font-bold text-zinc-100 tabular-nums">
+                    {formatBRL((detailItem.price + modalAddonsUnitTotal) * detailQty)}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setDetailQty((q) => q + 1)}
-                    className="size-8 rounded bg-[#09090b] text-zinc-200 flex items-center justify-center"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
                 </div>
+
+                {/* 1. Upsell de Batata Frita / Porções (incluindo "Em Breve") */}
+                {portionsInMenu.length > 0 && (
+                  <div className="bg-[#18181c] border border-orange-500/25 rounded-[10px] p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                          🍟 Vai uma Batata Frita crocante para acompanhar?
+                        </span>
+                        <p className="text-[11px] text-zinc-400">
+                          Combina perfeitamente com seu Monster Burger:
+                        </p>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">
+                        Opcional
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {portionsInMenu.map((portion) => {
+                        const status = portion.menuStatus || 'disponivel';
+                        const isComingSoon = status === 'em_breve';
+                        const isSoldOut = status === 'esgotado';
+                        const checked = selectedUpsellPortionIds.includes(portion.id);
+
+                        if (isComingSoon) {
+                          return (
+                            <div
+                              key={portion.id}
+                              className="flex items-center justify-between p-2.5 rounded-[8px] border border-amber-500/30 bg-amber-500/5 text-xs opacity-90"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                                {portion.imageUrl ? (
+                                  <img
+                                    src={portion.imageUrl}
+                                    alt={portion.name}
+                                    className="size-9 rounded object-cover shrink-0"
+                                  />
+                                ) : (
+                                  <span className="text-lg shrink-0">{portion.imageEmoji || '🍟'}</span>
+                                )}
+                                <div className="truncate">
+                                  <p className="font-semibold text-zinc-100 truncate">
+                                    {portion.name}
+                                  </p>
+                                  <p className="text-[11px] text-zinc-400 line-clamp-1">
+                                    {portion.description || 'Opção especial chegando em breve!'}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-bold shrink-0">
+                                🔥 Em Breve
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        if (isSoldOut) return null;
+
+                        return (
+                          <label
+                            key={portion.id}
+                            className={`flex items-center justify-between p-2.5 rounded-[8px] border cursor-pointer transition text-xs ${
+                              checked
+                                ? 'bg-orange-500/10 border-orange-500/50 text-zinc-100'
+                                : 'bg-[#09090b] border-white/[0.06] text-zinc-300 hover:border-white/[0.15]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleUpsellPortionInModal(portion.id)}
+                                className="accent-[#ff5400]"
+                              />
+                              {portion.imageUrl ? (
+                                <img
+                                  src={portion.imageUrl}
+                                  alt={portion.name}
+                                  className="size-8 rounded object-cover shrink-0"
+                                />
+                              ) : (
+                                <span className="text-base shrink-0">{portion.imageEmoji || '🍟'}</span>
+                              )}
+                              <div className="truncate">
+                                <span className="font-medium block truncate">{portion.name}</span>
+                                {portion.description && (
+                                  <span className="text-[10px] text-zinc-400 block truncate">
+                                    {portion.description}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="font-semibold text-orange-400 tabular-nums shrink-0">
+                              + {formatBRL(portion.price)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Upsell de Bebidas Geladas */}
+                {drinksInMenu.length > 0 && (
+                  <div className="bg-[#18181c] border border-orange-500/25 rounded-[10px] p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                        <Sparkles className="size-3.5 text-orange-400" />
+                        E uma bebida bem gelada para acompanhar?
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">
+                        Opcional
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {drinksInMenu.map((drink) => {
+                        const checked = selectedUpsellDrinkIds.includes(drink.id);
+                        return (
+                          <label
+                            key={drink.id}
+                            className={`flex items-center justify-between p-2 rounded-[8px] border cursor-pointer transition text-xs ${
+                              checked
+                                ? 'bg-orange-500/10 border-orange-500/50 text-zinc-100'
+                                : 'bg-[#09090b] border-white/[0.06] text-zinc-300 hover:border-white/[0.15]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleUpsellDrinkInModal(drink.id)}
+                                className="accent-[#ff5400]"
+                              />
+                              {drink.imageUrl ? (
+                                <img
+                                  src={drink.imageUrl}
+                                  alt={drink.name}
+                                  className="size-7 rounded object-cover"
+                                />
+                              ) : (
+                                <span>{drink.imageEmoji}</span>
+                              )}
+                              <span className="font-medium">{drink.name}</span>
+                            </div>
+                            <span className="font-semibold text-orange-400 tabular-nums">
+                              + {formatBRL(drink.price)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"
                   onClick={confirmProductDetail}
-                  className="flex-1 py-2.5 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-semibold rounded-[8px] text-xs flex items-center justify-between px-4 shadow-lg shadow-orange-500/25 transition"
+                  className="w-full py-3 bg-[#ff5400] hover:bg-[#ea4b00] text-white font-bold rounded-[8px] text-xs flex items-center justify-between px-4 shadow-lg shadow-orange-500/25 transition"
                 >
-                  <span>Adicionar à Sacola</span>
+                  <span>
+                    {modalUpsellTotal > 0
+                      ? 'Confirmar Lanche + Acompanhamentos'
+                      : 'Confirmar e Adicionar à Sacola'}
+                  </span>
                   <span className="tabular-nums font-bold">
-                    {formatBRL(detailItem.price * detailQty + modalUpsellTotal)}
+                    {formatBRL(
+                      (detailItem.price + modalAddonsUnitTotal) * detailQty + modalUpsellTotal
+                    )}
                   </span>
                 </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1220,8 +1781,16 @@ export default function CardapioVirtualPage() {
                       <div>
                         <p className="font-medium text-zinc-100">{item.name}</p>
                         <p className="text-[11px] text-zinc-400">
-                          {item.quantity}x {formatBRL(item.price)}
+                          {item.quantity}x {formatBRL(item.unitPriceWithAddons)}
                         </p>
+                        {item.addons && item.addons.length > 0 && (
+                          <p className="text-[10px] text-emerald-400">
+                            +{' '}
+                            {item.addons
+                              .map((a) => `${a.quantity}x ${a.name} (${formatBRL(a.unitPrice * a.quantity)})`)
+                              .join(', ')}
+                          </p>
+                        )}
                         {item.notes && (
                           <p className="text-[10px] text-orange-400 italic">Obs: {item.notes}</p>
                         )}

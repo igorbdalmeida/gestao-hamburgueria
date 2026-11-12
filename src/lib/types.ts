@@ -39,12 +39,21 @@ export interface RecipeItem {
   group: 'alimento' | 'embalagem';
 }
 
+export type ProductCategory =
+  | 'Hambúrgueres'
+  | 'Bebidas'
+  | 'Porções & Combos'
+  | 'Sobremesas'
+  | 'Acréscimos / Adicionais';
+
+export type ProductMenuStatus = 'disponivel' | 'em_breve' | 'esgotado';
+
 export interface Product {
   id: string;
   name: string;
   shortName: string;
   description: string;
-  category: 'Hambúrgueres' | 'Bebidas' | 'Porções & Combos' | 'Sobremesas';
+  category: ProductCategory;
   channel: 'delivery' | 'geral';
   imageEmoji: string;
   imageUrl?: string;
@@ -57,6 +66,9 @@ export interface Product {
   practicedPrice: number;
   availableInMenu: boolean;
   featured?: boolean;
+  menuStatus?: ProductMenuStatus;
+  trackStock?: boolean;
+  stockQty?: number | null;
 }
 
 export interface InvoiceItem {
@@ -112,8 +124,18 @@ export interface PaymentFeeConfig {
   deliveryFeeDefault: number;
   estimatedDeliveryMinutes: string;
   storeOpen: boolean;
+  dailyBurgerLimit?: number | null;
   adminPassword?: string;
   geminiApiKey?: string;
+}
+
+export interface OrderItemAddon {
+  addonId: string;
+  productId?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  unitCmv: number;
 }
 
 export interface OrderItem {
@@ -123,6 +145,7 @@ export interface OrderItem {
   unitPrice: number;
   unitCmv: number;
   notes?: string;
+  addons?: OrderItemAddon[];
 }
 
 export type OrderPaymentMethod =

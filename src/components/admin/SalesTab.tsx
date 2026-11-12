@@ -46,6 +46,7 @@ export default function SalesTab({ state, onUpdateState }: Props) {
   const [histPeriod, setHistPeriod] = useState<PeriodKey>('hoje');
   const [histFrom, setHistFrom] = useState('');
   const [histTo, setHistTo] = useState('');
+  const [showStockBar, setShowStockBar] = useState(false);
 
   function addPosQty(productId: string, delta: number) {
     setPosCart((prev) => {
@@ -189,8 +190,37 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         origin: 'Lançamento Manual PDV',
       };
 
+      // Deduct stock for PDV sale
+      let burgersSold = 0;
+      const updatedProducts = prev.products.map((p) => {
+        const soldQty = posCart[p.id] || 0;
+        if (soldQty <= 0) return p;
+        if (p.category === 'Hambúrgueres') {
+          burgersSold += soldQty;
+        }
+        if (p.trackStock && typeof p.stockQty === 'number') {
+          const nextStock = Math.max(0, p.stockQty - soldQty);
+          return {
+            ...p,
+            stockQty: nextStock,
+            menuStatus: nextStock === 0 ? 'esgotado' : p.menuStatus,
+          };
+        }
+        return p;
+      });
+
+      const nextSettings = { ...prev.settings };
+      if (typeof nextSettings.dailyBurgerLimit === 'number' && burgersSold > 0) {
+        nextSettings.dailyBurgerLimit = Math.max(
+          0,
+          nextSettings.dailyBurgerLimit - burgersSold
+        );
+      }
+
       return {
         ...prev,
+        settings: nextSettings,
+        products: updatedProducts,
         customers: nextCustomers,
         orders: [newOrder, ...prev.orders],
       };
@@ -200,10 +230,61 @@ export default function SalesTab({ state, onUpdateState }: Props) {
   }
 
   function handleUpdateOrderStatus(orderId: string, status: OrderStatus) {
-    onUpdateState((prev) => ({
-      ...prev,
-      orders: prev.orders.map((o) => (o.id === orderId ? { ...o, status } : o)),
-    }));
+    onUpdateState((prev) => {
+      const targetOrder = prev.orders.find((o) => o.id === orderId);
+      if (!targetOrder || targetOrder.status === status) return prev;
+
+      const wasCancelled = targetOrder.status === 'Cancelado';
+      const isNowCancelled = status === 'Cancelado';
+
+      let updatedProducts = prev.products;
+      let nextSettings = prev.settings;
+
+      // Restore or re-deduct stock when toggling Cancelado
+      if (!wasCancelled && isNowCancelled) {
+        const restoreMap: Record<string, number> = {};
+        let burgersToRestore = 0;
+        for (const item of targetOrder.items) {
+          restoreMap[item.productId] = (restoreMap[item.productId] || 0) + item.quantity;
+          const prod = prev.products.find((p) => p.id === item.productId);
+          if (prod?.category === 'Hambúrgueres') {
+            burgersToRestore += item.quantity;
+          }
+          if (item.addons) {
+            for (const ad of item.addons) {
+              const targetAddonId = ad.productId || ad.addonId;
+              restoreMap[targetAddonId] =
+                (restoreMap[targetAddonId] || 0) + ad.quantity * item.quantity;
+            }
+          }
+        }
+        updatedProducts = prev.products.map((p) => {
+          const addBack = restoreMap[p.id] || 0;
+          if (addBack > 0 && p.trackStock && typeof p.stockQty === 'number') {
+            const nextQty = p.stockQty + addBack;
+            return {
+              ...p,
+              stockQty: nextQty,
+              menuStatus: p.menuStatus === 'esgotado' && nextQty > 0 ? 'disponivel' : p.menuStatus,
+            };
+          }
+          return p;
+        });
+        if (typeof prev.settings.dailyBurgerLimit === 'number' && burgersToRestore > 0) {
+          nextSettings = {
+            ...prev.settings,
+            dailyBurgerLimit: prev.settings.dailyBurgerLimit + burgersToRestore,
+          };
+        }
+      }
+
+      return {
+        ...prev,
+        settings: nextSettings,
+        products: updatedProducts,
+        orders: prev.orders.map((o) => (o.id === orderId ? { ...o, status } : o)),
+      };
+    });
   }
 
   function handleDeleteOrder(orderId: string) {
@@ -328,6 +409,187 @@ export default function SalesTab({ state, onUpdateState }: Props) {
         </div>
       </div>
 
+      {/* Painel Rápido de Estoque da Noite & Pausar Item (1 Clique) */}
+      <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] overflow-hidden">
+        <div
+          onClick={() => setShowStockBar((v) => !v)}
+          className="px-4 py-3 bg-[#18181c]/70 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-[#18181c] transition"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-bold text-zinc-100 flex items-center gap-2">
+              📦 Controle Rápido de Estoque da Noite & Pausar Itens (1 Clique)
+            </span>
+            {typeof state.settings.dailyBurgerLimit === 'number' && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums border ${
+                  state.settings.dailyBurgerLimit <= 5
+                    ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                    : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                }`}
+              >
+                🍔 Fornada da Noite: {state.settings.dailyBurgerLimit} lanches restantes
+              </span>
+            )}
+            {state.products.some((p) => p.menuStatus === 'esgotado') && (
+              <span className="px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-semibold">
+                {state.products.filter((p) => p.menuStatus === 'esgotado').length} item(ns) esgotado(s)
+              </span>
+            )}
+          </div>
+          <span className="text-xs font-medium text-orange-400">
+            {showStockBar ? 'Ocultar painel ▲' : 'Abrir controle de estoque ▼'}
+          </span>
+        </div>
+
+        {showStockBar && (
+          <div className="p-4 space-y-4 border-t border-white/[0.08] text-xs">
+            {/* Global Nightly Burger Limit */}
+            <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold text-zinc-100">
+                  🍔 Limite Geral de Hambúrgueres da Noite (Estoque de Pães / Blends)
+                </p>
+                <p className="text-[11px] text-zinc-400">
+                  Se você tem ex: 30 pães hoje, digite 30 aqui. Cada hambúrguer vendido desconta automaticamente deste total.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Sem limite"
+                  value={
+                    typeof state.settings.dailyBurgerLimit === 'number'
+                      ? state.settings.dailyBurgerLimit
+                      : ''
+                  }
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const parsed = raw === '' ? null : Math.max(0, parseInt(raw, 10) || 0);
+                    onUpdateState((prev) => ({
+                      ...prev,
+                      settings: {
+                        ...prev.settings,
+                        dailyBurgerLimit: parsed,
+                      },
+                    }));
+                  }}
+                  className="w-28 bg-[#09090b] border border-white/[0.15] rounded-[6px] px-3 py-1.5 text-zinc-100 font-bold text-center tabular-nums"
+                />
+                {typeof state.settings.dailyBurgerLimit === 'number' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdateState((prev) => ({
+                        ...prev,
+                        settings: { ...prev.settings, dailyBurgerLimit: null },
+                      }))
+                    }
+                    className="px-2.5 py-1.5 rounded-[6px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px]"
+                  >
+                    Desativar limite
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Individual Product Status & Stock */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {state.products.map((prod) => {
+                const status = prod.menuStatus || (prod.availableInMenu ? 'disponivel' : 'esgotado');
+                return (
+                  <div
+                    key={`stk-${prod.id}`}
+                    className="bg-[#09090b] border border-white/[0.08] rounded-[8px] p-2.5 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0 pr-1">
+                      <p className="font-medium text-zinc-100 truncate">
+                        {prod.shortName || prod.name}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">{prod.category}</p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <select
+                        value={status}
+                        onChange={(e) => {
+                          const nextStatus = e.target.value as 'disponivel' | 'em_breve' | 'esgotado';
+                          onUpdateState((prev) => ({
+                            ...prev,
+                            products: prev.products.map((p) =>
+                              p.id === prod.id
+                                ? { ...p, menuStatus: nextStatus, availableInMenu: true }
+                                : p
+                            ),
+                          }));
+                        }}
+                        className={`rounded-[6px] px-2 py-1 text-[11px] font-semibold border ${
+                          status === 'disponivel'
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                            : status === 'em_breve'
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                            : 'bg-red-500/15 border-red-500/30 text-red-400'
+                        }`}
+                      >
+                        <option value="disponivel" className="bg-[#09090b] text-zinc-100">
+                          ✅ Disponível
+                        </option>
+                        <option value="em_breve" className="bg-[#09090b] text-zinc-100">
+                          🔥 Em Breve
+                        </option>
+                        <option value="esgotado" className="bg-[#09090b] text-zinc-100">
+                          🚫 Esgotado
+                        </option>
+                      </select>
+
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="Qtd"
+                        title="Estoque individual hoje (deixe vazio se não quiser limitar este item individualmente)"
+                        value={prod.trackStock && typeof prod.stockQty === 'number' ? prod.stockQty : ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') {
+                            onUpdateState((prev) => ({
+                              ...prev,
+                              products: prev.products.map((p) =>
+                                p.id === prod.id ? { ...p, trackStock: false, stockQty: null } : p
+                              ),
+                            }));
+                          } else {
+                            const qty = Math.max(0, parseInt(val, 10) || 0);
+                            onUpdateState((prev) => ({
+                              ...prev,
+                              products: prev.products.map((p) =>
+                                p.id === prod.id
+                                  ? {
+                                      ...p,
+                                      trackStock: true,
+                                      stockQty: qty,
+                                      menuStatus:
+                                        qty === 0
+                                          ? 'esgotado'
+                                          : p.menuStatus === 'esgotado'
+                                          ? 'disponivel'
+                                          : p.menuStatus,
+                                    }
+                                  : p
+                              ),
+                            }));
+                          }
+                        }}
+                        className="w-14 bg-[#18181c] border border-white/[0.12] rounded-[6px] px-1.5 py-1 text-center text-[11px] font-bold text-zinc-100 tabular-nums"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Fila de Pedidos Principal em Tempo Real (Posicionada no Topo da Gestão) */}
       <div className="bg-[#121215] border border-orange-500/35 rounded-[10px] overflow-hidden shadow-lg shadow-black/50">
         <div className="px-4 py-3 bg-gradient-to-r from-[#18181c] via-[#141418] to-[#121215] border-b border-white/[0.08] flex items-center justify-between">
@@ -356,7 +618,13 @@ export default function SalesTab({ state, onUpdateState }: Props) {
           <div className="divide-y divide-white/[0.06] text-xs">
             {activeQueueOrders.map((ord) => {
               const itemsText = ord.items
-                .map((i) => `${i.quantity}x ${i.productName}${i.notes ? ` (${i.notes})` : ''}`)
+                .map((i) => {
+                  const addonsStr =
+                    i.addons && i.addons.length > 0
+                      ? ` [+ ${i.addons.map((a) => `${a.quantity}x ${a.name}`).join(', ')}]`
+                      : '';
+                  return `${i.quantity}x ${i.productName}${addonsStr}${i.notes ? ` (${i.notes})` : ''}`;
+                })
                 .join(', ');
               const statusMessage =
                 ord.status === 'Em Preparo'
@@ -401,6 +669,11 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                       {ord.items.map((i, idx) => (
                         <div key={idx}>
                           • <strong className="text-zinc-100">{i.quantity}x</strong> {i.productName} ({formatBRL(i.unitPrice * i.quantity)})
+                          {i.addons && i.addons.length > 0 && (
+                            <span className="text-emerald-400 font-semibold ml-1.5">
+                              [+ {i.addons.map((a) => `${a.quantity}x ${a.name}`).join(', ')}]
+                            </span>
+                          )}
                           {i.notes && (
                             <span className="text-orange-400 italic ml-1.5 font-normal">
                               [Obs: {i.notes}]
@@ -639,7 +912,15 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                     </span>
                   </div>
                   <p className="text-[11px] text-zinc-400">
-                    {ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(', ')}
+                    {ord.items
+                      .map((i) => {
+                        const addonsStr =
+                          i.addons && i.addons.length > 0
+                            ? ` (+${i.addons.map((a) => `${a.quantity}x ${a.name}`).join(', ')})`
+                            : '';
+                        return `${i.quantity}x ${i.productName}${addonsStr}`;
+                      })
+                      .join(', ')}
                   </p>
                 </div>
 

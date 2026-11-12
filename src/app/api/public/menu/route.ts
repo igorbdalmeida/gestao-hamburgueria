@@ -10,7 +10,7 @@ import {
   signSession,
   verifySession,
 } from '@/lib/session';
-import { OrderItem, OrderPaymentMethod, SaleOrder } from '@/lib/types';
+import { OrderItem, OrderItemAddon, OrderPaymentMethod, SaleOrder } from '@/lib/types';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { toLocalDate } from '@/lib/periods';
@@ -69,19 +69,41 @@ export async function GET(request: Request) {
     });
   }
 
+  const globalBurgerLimit =
+    typeof state.settings.dailyBurgerLimit === 'number'
+      ? state.settings.dailyBurgerLimit
+      : null;
+
   // Public Menu Response — NO CMV, NO MARGINS, NO SUPPLIERS, NO FINANCIAL DATA
   const publicMenu = state.products
     .filter((p) => p.availableInMenu)
-    .map((p) => ({
-      id: p.id,
-      name: p.shortName || p.name,
-      description: p.description,
-      category: p.category,
-      imageEmoji: p.imageEmoji,
-      imageUrl: p.imageUrl || null,
-      price: p.practicedPrice,
-      featured: Boolean(p.featured),
-    }));
+    .map((p) => {
+      let effectiveStatus = p.menuStatus || 'disponivel';
+      if (effectiveStatus === 'disponivel') {
+        if (p.trackStock && typeof p.stockQty === 'number' && p.stockQty <= 0) {
+          effectiveStatus = 'esgotado';
+        } else if (
+          p.category === 'Hambúrgueres' &&
+          globalBurgerLimit !== null &&
+          globalBurgerLimit <= 0
+        ) {
+          effectiveStatus = 'esgotado';
+        }
+      }
+      return {
+        id: p.id,
+        name: p.shortName || p.name,
+        description: p.description,
+        category: p.category,
+        imageEmoji: p.imageEmoji,
+        imageUrl: p.imageUrl || null,
+        price: p.practicedPrice,
+        featured: Boolean(p.featured),
+        menuStatus: effectiveStatus,
+        trackStock: Boolean(p.trackStock),
+        stockQty: p.trackStock && typeof p.stockQty === 'number' ? p.stockQty : null,
+      };
+    });
 
   return NextResponse.json({
     store: {
@@ -93,6 +115,7 @@ export async function GET(request: Request) {
       pixKey: state.settings.pixKey,
       pixBeneficiary: state.settings.pixBeneficiary,
       whatsappNumber: state.settings.whatsappNumber,
+      dailyBurgerLimit: globalBurgerLimit,
     },
     menu: publicMenu,
   });
@@ -129,7 +152,12 @@ export async function POST(request: Request) {
         complement?: string;
         reference?: string;
       };
-      items: { productId: string; quantity: number; notes?: string }[];
+      items: {
+        productId: string;
+        quantity: number;
+        notes?: string;
+        addons?: { productId: string; quantity: number }[];
+      }[];
       paymentMethod: OrderPaymentMethod;
       changeFor?: string;
       customerNotes?: string;
@@ -163,30 +191,159 @@ export async function POST(request: Request) {
     const orderItems: OrderItem[] = [];
     let subtotal = 0;
     let totalCmv = 0;
+    let totalBurgersInOrder = 0;
+
+    // Aggregate quantities per productId to validate stock accurately
+    const requestedProductQty: Record<string, number> = {};
 
     for (const cartItem of items) {
       const product = state.products.find((p) => p.id === cartItem.productId);
       if (!product || !product.availableInMenu) continue;
-      const metrics = calculateProductMetrics(product, state.ingredients);
+
+      const status = product.menuStatus || 'disponivel';
+      if (status === 'em_breve') {
+        return NextResponse.json(
+          { error: `O item "${product.shortName || product.name}" estará disponível em breve e ainda não pode ser pedido.` },
+          { status: 400 }
+        );
+      }
+      if (status === 'esgotado') {
+        return NextResponse.json(
+          { error: `O item "${product.shortName || product.name}" acabou de esgotar hoje.` },
+          { status: 400 }
+        );
+      }
+
       const qty = Math.min(50, Math.max(1, Number(cartItem.quantity) || 1));
+      requestedProductQty[product.id] = (requestedProductQty[product.id] || 0) + qty;
+
+      if (
+        product.trackStock &&
+        typeof product.stockQty === 'number' &&
+        requestedProductQty[product.id] > product.stockQty
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              product.stockQty <= 0
+                ? `O item "${product.shortName || product.name}" esgotou hoje.`
+                : `Restam apenas ${product.stockQty} unidade(s) de "${product.shortName || product.name}" hoje.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (product.category === 'Hambúrgueres') {
+        totalBurgersInOrder += qty;
+      }
+
+      const metrics = calculateProductMetrics(product, state.ingredients);
+
+      // Process optional burger add-ons
+      const orderItemAddons: OrderItemAddon[] = [];
+      if (Array.isArray(cartItem.addons)) {
+        for (const addonInput of cartItem.addons) {
+          const addonQty = Math.min(10, Math.max(0, Number(addonInput.quantity) || 0));
+          if (addonQty <= 0) continue;
+          const addonProd = state.products.find(
+            (p) => p.id === addonInput.productId && p.category === 'Acréscimos / Adicionais'
+          );
+          if (!addonProd || !addonProd.availableInMenu) continue;
+          const addonStatus = addonProd.menuStatus || 'disponivel';
+          if (addonStatus !== 'disponivel') continue;
+
+          const totalAddonNeeded = addonQty * qty;
+          requestedProductQty[addonProd.id] =
+            (requestedProductQty[addonProd.id] || 0) + totalAddonNeeded;
+
+          if (
+            addonProd.trackStock &&
+            typeof addonProd.stockQty === 'number' &&
+            requestedProductQty[addonProd.id] > addonProd.stockQty
+          ) {
+            return NextResponse.json(
+              {
+                error: `O acréscimo "${addonProd.shortName || addonProd.name}" está sem estoque suficiente hoje.`,
+              },
+              { status: 400 }
+            );
+          }
+
+          const addonMetrics = calculateProductMetrics(addonProd, state.ingredients);
+          orderItemAddons.push({
+            addonId: addonProd.id,
+            productId: addonProd.id,
+            name: addonProd.shortName || addonProd.name,
+            quantity: addonQty,
+            unitPrice: addonProd.practicedPrice,
+            unitCmv: addonMetrics.totalCmv,
+          });
+        }
+      }
+
+      const addonsUnitPrice = orderItemAddons.reduce(
+        (sum, a) => sum + a.unitPrice * a.quantity,
+        0
+      );
+      const addonsUnitCmv = orderItemAddons.reduce(
+        (sum, a) => sum + a.unitCmv * a.quantity,
+        0
+      );
+
+      const unitPriceWithAddons = product.practicedPrice + addonsUnitPrice;
+      const unitCmvWithAddons = metrics.totalCmv + addonsUnitCmv;
 
       orderItems.push({
         productId: product.id,
         productName: product.shortName || product.name,
         quantity: qty,
-        unitPrice: product.practicedPrice,
-        unitCmv: metrics.totalCmv,
+        unitPrice: unitPriceWithAddons,
+        unitCmv: unitCmvWithAddons,
         notes: cartItem.notes ? String(cartItem.notes).slice(0, 200) : undefined,
+        addons: orderItemAddons.length > 0 ? orderItemAddons : undefined,
       });
 
-      subtotal += product.practicedPrice * qty;
-      totalCmv += metrics.totalCmv * qty;
+      subtotal += unitPriceWithAddons * qty;
+      totalCmv += unitCmvWithAddons * qty;
+    }
+
+    if (
+      typeof state.settings.dailyBurgerLimit === 'number' &&
+      totalBurgersInOrder > 0 &&
+      totalBurgersInOrder > state.settings.dailyBurgerLimit
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            state.settings.dailyBurgerLimit <= 0
+              ? 'Nossos hambúrgueres artesanais esgotaram por hoje!'
+              : `Restam apenas ${state.settings.dailyBurgerLimit} hambúrguer(es) disponíveis na fornada de hoje.`,
+        },
+        { status: 400 }
+      );
     }
 
     if (orderItems.length === 0) {
       return NextResponse.json(
         { error: 'Nenhum item válido selecionado.' },
         { status: 400 }
+      );
+    }
+
+    // Automatically deduct stock quantities for ordered products & add-ons
+    for (const [prodId, usedQty] of Object.entries(requestedProductQty)) {
+      const prod = state.products.find((p) => p.id === prodId);
+      if (prod && prod.trackStock && typeof prod.stockQty === 'number') {
+        prod.stockQty = Math.max(0, prod.stockQty - usedQty);
+        if (prod.stockQty === 0) {
+          prod.menuStatus = 'esgotado';
+        }
+      }
+    }
+    if (typeof state.settings.dailyBurgerLimit === 'number' && totalBurgersInOrder > 0) {
+      state.settings.dailyBurgerLimit = Math.max(
+        0,
+        state.settings.dailyBurgerLimit - totalBurgersInOrder
       );
     }
 

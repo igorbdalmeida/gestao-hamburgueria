@@ -143,12 +143,21 @@ export function calculateOrderFinancials(
     const qty = Number(item.quantity) || 0;
     const itemRev = (Number(item.unitPrice) || 0) * qty;
 
-    const unitCmv =
-      item.unitCmv !== undefined && item.unitCmv > 0
-        ? item.unitCmv
-        : product
-        ? calculateProductMetrics(product, ingredients).totalCmv
-        : 0;
+    const addonsLiveCmv = Array.isArray(item.addons)
+      ? item.addons.reduce((acc, ad) => {
+          const adProd = prodMap.get(ad.addonId);
+          const adCmv = adProd
+            ? calculateProductMetrics(adProd, ingredients).totalCmv
+            : Number(ad.unitCmv) || 0;
+          return acc + adCmv * (Number(ad.quantity) || 1);
+        }, 0)
+      : 0;
+
+    const unitCmv = product
+      ? calculateProductMetrics(product, ingredients).totalCmv + addonsLiveCmv
+      : item.unitCmv !== undefined && item.unitCmv > 0
+      ? item.unitCmv
+      : addonsLiveCmv;
     itemsCmv += unitCmv * qty;
 
     // product.taxPct na Precificação agora representa a Taxa do Cartão de Crédito (InfinitePay)

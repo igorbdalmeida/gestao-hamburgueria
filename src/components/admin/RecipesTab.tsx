@@ -272,6 +272,113 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
     setSelectedId(copy.id);
   }
 
+  function handleSeedDefaultAddons() {
+    const findIng = (keywords: string[]) =>
+      state.ingredients.find((i) =>
+        keywords.some((k) => i.name.toLowerCase().includes(k.toLowerCase()))
+      );
+
+    const blend = findIng(['blend de carne', 'blend', 'carne']);
+    const bacon = findIng(['bacon']);
+    const cheddar = findIng(['cheddar']);
+    const mussarela = findIng(['mussarela', 'muçarela', 'queijo']);
+    const alface = findIng(['alface']);
+    const tomate = findIng(['tomate']);
+
+    const templates: Array<{
+      name: string;
+      shortName: string;
+      description: string;
+      emoji: string;
+      price: number;
+      recipe: RecipeItem[];
+    }> = [
+      {
+        name: 'Acréscimo: + Carne Extra (Blend 130g)',
+        shortName: '+ Carne Extra (130g)',
+        description: 'Mais um blend bovino artesanal 130g grelhado na brasa.',
+        emoji: '🥩',
+        price: 8.0,
+        recipe: blend ? [{ ingredientId: blend.id, quantity: 130, group: 'alimento' }] : [],
+      },
+      {
+        name: 'Acréscimo: + Bacon Crocante Extra',
+        shortName: '+ Bacon Extra',
+        description: 'Porção generosa de fatias de bacon crocante.',
+        emoji: '🥓',
+        price: 5.0,
+        recipe: bacon ? [{ ingredientId: bacon.id, quantity: 40, group: 'alimento' }] : [],
+      },
+      {
+        name: 'Acréscimo: + Queijo Cheddar Extra',
+        shortName: '+ Cheddar Extra',
+        description: 'Fatias extras de cheddar derretido.',
+        emoji: '🧀',
+        price: 4.0,
+        recipe: cheddar ? [{ ingredientId: cheddar.id, quantity: 30, group: 'alimento' }] : [],
+      },
+      {
+        name: 'Acréscimo: + Queijo Muçarela Extra',
+        shortName: '+ Muçarela Extra',
+        description: 'Camada extra de queijo muçarela derretido.',
+        emoji: '🧀',
+        price: 4.0,
+        recipe: mussarela
+          ? [{ ingredientId: mussarela.id, quantity: 30, group: 'alimento' }]
+          : [],
+      },
+      {
+        name: 'Acréscimo: + Salada Extra',
+        shortName: '+ Salada Extra',
+        description: 'Adicional de salada fresca selecionada.',
+        emoji: '🥬',
+        price: 2.5,
+        recipe: [
+          ...(alface ? [{ ingredientId: alface.id, quantity: 25, group: 'alimento' as const }] : []),
+          ...(tomate ? [{ ingredientId: tomate.id, quantity: 35, group: 'alimento' as const }] : []),
+        ],
+      },
+    ];
+
+    onUpdateState((prev) => {
+      const existingNames = new Set(
+        prev.products.map((p) => p.shortName.toLowerCase().trim())
+      );
+      const toAdd: Product[] = [];
+
+      templates.forEach((tpl, idx) => {
+        if (!existingNames.has(tpl.shortName.toLowerCase().trim())) {
+          toAdd.push({
+            id: `addon-${Date.now()}-${idx}`,
+            name: tpl.name,
+            shortName: tpl.shortName,
+            description: tpl.description,
+            category: 'Acréscimos / Adicionais',
+            channel: 'delivery',
+            imageEmoji: tpl.emoji,
+            availableInMenu: true,
+            menuStatus: 'disponivel',
+            featured: false,
+            fixedCostPct: prev.settings.defaultFixedCostPct,
+            taxPct: prev.settings.estimatedTaxPct,
+            channelFeePct: prev.settings.defaultChannelFeePct,
+            targetMarginPct: prev.settings.defaultTargetMarginPct,
+            practicedPrice: tpl.price,
+            recipe: tpl.recipe,
+          });
+        }
+      });
+
+      if (toAdd.length > 0) {
+        setSelectedId(toAdd[0].id);
+      }
+      return {
+        ...prev,
+        products: [...prev.products, ...toAdd],
+      };
+    });
+  }
+
   function handleCreateNewProduct(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -303,9 +410,12 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
           ? '🍟'
           : newCategory === 'Sobremesas'
           ? '🍫'
+          : newCategory === 'Acréscimos / Adicionais'
+          ? '🥓'
           : '🍔',
       imageUrl: newImageUrl.trim() || undefined,
       availableInMenu: true,
+      menuStatus: 'disponivel',
       featured: newFeatured,
       fixedCostPct: state.settings.defaultFixedCostPct,
       taxPct: state.settings.estimatedTaxPct,
@@ -355,16 +465,26 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
             Fichas Técnicas & Fotos do Cardápio
           </h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Composição de insumos, embalagens e fotos exibidas para os clientes no Cardápio Virtual.
+            Composição de insumos, embalagens, acréscimos, status (&ldquo;Em Breve&rdquo; / &ldquo;Esgotado&rdquo;) e estoque da noite.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowNewModal(true)}
-          className="btn-monster-primary"
-        >
-          <Plus className="size-4" /> Novo Produto
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSeedDefaultAddons}
+            className="btn-saas-secondary text-xs border-orange-500/30 text-orange-300 hover:bg-orange-500/10"
+            title="Cria os 5 acréscimos padrão (Carne Extra, Bacon Extra, Cheddar Extra, Muçarela Extra e Salada Extra) já vinculados aos seus insumos"
+          >
+            <Plus className="size-3.5 text-orange-400" /> Gerar Acréscimos Padrão
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowNewModal(true)}
+            className="btn-monster-primary"
+          >
+            <Plus className="size-4" /> Novo Produto
+          </button>
+        </div>
       </div>
 
       {/* Product Selector Tabs */}
@@ -372,6 +492,8 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         {state.products.map((prod) => {
           const m = calculateProductMetrics(prod, state.ingredients);
           const active = prod.id === selectedProduct?.id;
+          const status = prod.menuStatus || (prod.availableInMenu ? 'disponivel' : 'esgotado');
+          const isAddon = prod.category === 'Acréscimos / Adicionais';
           return (
             <button
               key={prod.id}
@@ -395,7 +517,29 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                 </div>
               )}
               <div>
-                <div className="text-xs font-medium text-zinc-100">{prod.shortName || prod.name}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-zinc-100">{prod.shortName || prod.name}</span>
+                  {isAddon && (
+                    <span className="px-1.5 py-0.5 rounded bg-orange-500/15 border border-orange-500/30 text-[9px] font-bold uppercase text-orange-300">
+                      Adicional
+                    </span>
+                  )}
+                  {status === 'em_breve' && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[9px] font-bold uppercase text-amber-300">
+                      🔥 Em Breve
+                    </span>
+                  )}
+                  {status === 'esgotado' && (
+                    <span className="px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/30 text-[9px] font-bold uppercase text-red-400">
+                      Esgotado
+                    </span>
+                  )}
+                  {prod.trackStock && typeof prod.stockQty === 'number' && status === 'disponivel' && (
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-[9px] font-bold text-emerald-300 tabular-nums">
+                      Est: {prod.stockQty}
+                    </span>
+                  )}
+                </div>
                 <div className="text-[11px] text-zinc-400 tabular-nums mt-0.5">
                   CMV: {formatBRL(m.totalCmv)} • Venda: {formatBRL(prod.practicedPrice)}
                 </div>
@@ -414,7 +558,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                 <h2 className="text-base font-semibold text-zinc-100">
                   {selectedProduct.name}
                 </h2>
-                <div className="flex flex-wrap items-center gap-4 mt-1.5">
+                <div className="flex flex-wrap items-center gap-4 mt-2">
                   <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                     <input
                       type="checkbox"
@@ -431,8 +575,83 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                       }
                       className="accent-orange-500"
                     />
-                    Visível no Cardápio Online
+                    Exibir no Cardápio Online
                   </label>
+
+                  <div className="inline-flex items-center gap-1.5 text-xs">
+                    <span className="text-zinc-400">Status:</span>
+                    <select
+                      value={selectedProduct.menuStatus || 'disponivel'}
+                      onChange={(e) =>
+                        onUpdateState((prev) => ({
+                          ...prev,
+                          products: prev.products.map((p) =>
+                            p.id === selectedProduct.id
+                              ? {
+                                  ...p,
+                                  menuStatus: e.target.value as Product['menuStatus'],
+                                  availableInMenu: true,
+                                }
+                              : p
+                          ),
+                        }))
+                      }
+                      className="bg-[#09090b] border border-white/[0.14] rounded-[6px] px-2 py-1 text-xs font-medium text-zinc-100"
+                    >
+                      <option value="disponivel">✅ Disponível p/ Venda</option>
+                      <option value="em_breve">🔥 Em Breve (Vitrine)</option>
+                      <option value="esgotado">🚫 Esgotado Hoje</option>
+                    </select>
+                  </div>
+
+                  <div className="inline-flex items-center gap-2 bg-[#18181c] border border-white/[0.08] rounded-[6px] px-2.5 py-1">
+                    <label className="inline-flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedProduct.trackStock)}
+                        onChange={(e) =>
+                          onUpdateState((prev) => ({
+                            ...prev,
+                            products: prev.products.map((p) =>
+                              p.id === selectedProduct.id
+                                ? {
+                                    ...p,
+                                    trackStock: e.target.checked,
+                                    stockQty: typeof p.stockQty === 'number' ? p.stockQty : 15,
+                                  }
+                                : p
+                            ),
+                          }))
+                        }
+                        className="accent-emerald-500"
+                      />
+                      Estoque da Noite:
+                    </label>
+                    {selectedProduct.trackStock && (
+                      <input
+                        type="number"
+                        min={0}
+                        value={selectedProduct.stockQty ?? 0}
+                        onChange={(e) => {
+                          const qty = Math.max(0, parseInt(e.target.value, 10) || 0);
+                          onUpdateState((prev) => ({
+                            ...prev,
+                            products: prev.products.map((p) =>
+                              p.id === selectedProduct.id
+                                ? {
+                                    ...p,
+                                    stockQty: qty,
+                                    menuStatus: qty === 0 ? 'esgotado' : p.menuStatus === 'esgotado' ? 'disponivel' : p.menuStatus,
+                                  }
+                                : p
+                            ),
+                          }));
+                        }}
+                        className="w-16 bg-[#09090b] border border-white/[0.16] rounded px-2 py-0.5 text-xs font-bold text-emerald-400 text-center tabular-nums"
+                        title="Quantidade disponível hoje (baixa automática a cada pedido)"
+                      />
+                    )}
+                  </div>
 
                   <label className="inline-flex items-center gap-2 text-xs text-amber-400 cursor-pointer">
                     <input
@@ -948,6 +1167,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                   >
                     <option value="Hambúrgueres">Hambúrgueres</option>
                     <option value="Porções & Combos">Porções & Combos</option>
+                    <option value="Acréscimos / Adicionais">Acréscimos / Adicionais</option>
                     <option value="Bebidas">Bebidas</option>
                     <option value="Sobremesas">Sobremesas</option>
                   </select>
@@ -1115,6 +1335,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                   >
                     <option value="Hambúrgueres">Hambúrgueres</option>
                     <option value="Porções & Combos">Porções & Combos</option>
+                    <option value="Acréscimos / Adicionais">Acréscimos / Adicionais</option>
                     <option value="Bebidas">Bebidas</option>
                     <option value="Sobremesas">Sobremesas</option>
                   </select>
