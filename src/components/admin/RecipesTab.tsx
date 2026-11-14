@@ -294,45 +294,45 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
       recipe: RecipeItem[];
     }> = [
       {
-        name: 'Acréscimo: + Carne Extra (Blend 130g)',
+        name: '+ Carne Extra (130g)',
         shortName: '+ Carne Extra (130g)',
         description: 'Mais um blend bovino artesanal 130g grelhado na brasa.',
         emoji: '🥩',
-        price: 8.0,
+        price: 6.0,
         recipe: blend ? [{ ingredientId: blend.id, quantity: 130, group: 'alimento' }] : [],
       },
       {
-        name: 'Acréscimo: + Bacon Crocante Extra',
+        name: '+ Bacon Extra',
         shortName: '+ Bacon Extra',
         description: 'Porção generosa de fatias de bacon crocante.',
         emoji: '🥓',
-        price: 5.0,
-        recipe: bacon ? [{ ingredientId: bacon.id, quantity: 40, group: 'alimento' }] : [],
+        price: 3.5,
+        recipe: bacon ? [{ ingredientId: bacon.id, quantity: 30, group: 'alimento' }] : [],
       },
       {
-        name: 'Acréscimo: + Queijo Cheddar Extra',
+        name: '+ Cheddar Extra',
         shortName: '+ Cheddar Extra',
         description: 'Fatias extras de cheddar derretido.',
         emoji: '🧀',
-        price: 4.0,
+        price: 3.0,
         recipe: cheddar ? [{ ingredientId: cheddar.id, quantity: 30, group: 'alimento' }] : [],
       },
       {
-        name: 'Acréscimo: + Queijo Muçarela Extra',
+        name: '+ Muçarela Extra',
         shortName: '+ Muçarela Extra',
         description: 'Camada extra de queijo muçarela derretido.',
         emoji: '🧀',
-        price: 4.0,
+        price: 3.0,
         recipe: mussarela
           ? [{ ingredientId: mussarela.id, quantity: 30, group: 'alimento' }]
           : [],
       },
       {
-        name: 'Acréscimo: + Salada Extra',
+        name: '+ Salada Extra',
         shortName: '+ Salada Extra',
         description: 'Adicional de salada fresca selecionada.',
         emoji: '🥬',
-        price: 2.5,
+        price: 2.0,
         recipe: [
           ...(alface ? [{ ingredientId: alface.id, quantity: 25, group: 'alimento' as const }] : []),
           ...(tomate ? [{ ingredientId: tomate.id, quantity: 35, group: 'alimento' as const }] : []),
@@ -342,7 +342,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
     onUpdateState((prev) => {
       const existingNames = new Set(
-        prev.products.map((p) => p.shortName.toLowerCase().trim())
+        prev.products.map((p) => (p.shortName || p.name).toLowerCase().trim())
       );
       const toAdd: Product[] = [];
 
@@ -350,7 +350,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         if (!existingNames.has(tpl.shortName.toLowerCase().trim())) {
           toAdd.push({
             id: `addon-${Date.now()}-${idx}`,
-            name: tpl.name,
+            name: tpl.shortName,
             shortName: tpl.shortName,
             description: tpl.description,
             category: 'Acréscimos / Adicionais',
@@ -359,10 +359,10 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
             availableInMenu: true,
             menuStatus: 'disponivel',
             featured: false,
-            fixedCostPct: prev.settings.defaultFixedCostPct,
+            fixedCostPct: 0,
             taxPct: prev.settings.estimatedTaxPct,
-            channelFeePct: prev.settings.defaultChannelFeePct,
-            targetMarginPct: prev.settings.defaultTargetMarginPct,
+            channelFeePct: 0,
+            targetMarginPct: 0.25,
             practicedPrice: tpl.price,
             recipe: tpl.recipe,
           });
@@ -396,10 +396,13 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
       if (saco) defaultRecipe.push({ ingredientId: saco.id, quantity: 1, group: 'embalagem' });
     }
 
+    const finalProductName = (newShortName.trim() || newName.trim());
+    const isAddonCategory = newCategory === 'Acréscimos / Adicionais';
+
     const created: Product = {
       id: `prod-${Date.now()}`,
-      name: newName.trim(),
-      shortName: newShortName.trim() || newName.trim(),
+      name: finalProductName,
+      shortName: finalProductName,
       description: newDesc.trim() || '',
       category: newCategory,
       channel: newCategory === 'Bebidas' ? 'geral' : 'delivery',
@@ -410,18 +413,18 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
           ? '🍟'
           : newCategory === 'Sobremesas'
           ? '🍫'
-          : newCategory === 'Acréscimos / Adicionais'
+          : isAddonCategory
           ? '🥓'
           : '🍔',
       imageUrl: newImageUrl.trim() || undefined,
       availableInMenu: true,
       menuStatus: 'disponivel',
       featured: newFeatured,
-      fixedCostPct: state.settings.defaultFixedCostPct,
+      fixedCostPct: isAddonCategory ? 0 : state.settings.defaultFixedCostPct,
       taxPct: state.settings.estimatedTaxPct,
-      channelFeePct: state.settings.defaultChannelFeePct,
+      channelFeePct: isAddonCategory ? 0 : state.settings.defaultChannelFeePct,
       targetMarginPct: state.settings.defaultTargetMarginPct,
-      practicedPrice: parseFloat(newPrice) || 24.9,
+      practicedPrice: parseFloat(newPrice) || (isAddonCategory ? 4.0 : 24.9),
       recipe: defaultRecipe,
     };
 
@@ -556,7 +559,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
             <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/[0.08]">
               <div>
                 <h2 className="text-base font-semibold text-zinc-100">
-                  {selectedProduct.name}
+                  {selectedProduct.shortName || selectedProduct.name}
                 </h2>
                 <div className="flex flex-wrap items-center gap-4 mt-2">
                   <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
@@ -1133,15 +1136,17 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="text-zinc-400 block mb-1">Nome Comercial (Exibido no Cardápio)</label>
+                  <label className="text-zinc-400 block mb-1">Nome do Produto (Cardápio e Gestão)</label>
                   <input
                     type="text"
-                    value={selectedProduct.shortName}
+                    value={selectedProduct.shortName || selectedProduct.name}
                     onChange={(e) =>
                       onUpdateState((prev) => ({
                         ...prev,
                         products: prev.products.map((p) =>
-                          p.id === selectedProduct.id ? { ...p, shortName: e.target.value } : p
+                          p.id === selectedProduct.id
+                            ? { ...p, shortName: e.target.value, name: e.target.value }
+                            : p
                         ),
                       }))
                     }
@@ -1305,23 +1310,16 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
               </div>
 
               <div>
-                <label className="text-zinc-400 block mb-1">Nome Interno (Ficha Técnica) *</label>
+                <label className="text-zinc-400 block mb-1">Nome do Produto / Lanche / Acréscimo *</label>
                 <input
                   type="text"
                   required
                   value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ex: Lanche 6 (Duplo Bacon) - Delivery"
-                  className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-2 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="text-zinc-400 block mb-1">Nome Comercial no Cardápio Online</label>
-                <input
-                  type="text"
-                  value={newShortName}
-                  onChange={(e) => setNewShortName(e.target.value)}
-                  placeholder="Ex: Monster Duplo Bacon"
+                  onChange={(e) => {
+                    setNewName(e.target.value);
+                    setNewShortName(e.target.value);
+                  }}
+                  placeholder="Ex: Colosso, Batata Especial, + Bacon Extra..."
                   className="w-full bg-[#09090b] border border-white/[0.1] rounded-[6px] px-3 py-2 text-zinc-100"
                 />
               </div>

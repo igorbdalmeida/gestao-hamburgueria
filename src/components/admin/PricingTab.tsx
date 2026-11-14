@@ -147,7 +147,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
                     }`}
                   >
                     <td className="py-2.5 px-4 font-medium text-zinc-100">
-                      {product.name}
+                      {product.shortName || product.name}
                     </td>
                     <td className="py-2.5 px-3 text-zinc-400">{product.channel}</td>
                     <td className="py-2.5 px-3 text-right text-zinc-300">
@@ -297,7 +297,7 @@ export default function PricingTab({ state, onUpdateState }: Props) {
               <SlidersHorizontal className="size-4 text-zinc-400" />
               <div>
                 <h2 className="text-sm font-semibold text-zinc-100">
-                  Simulador por Meio de Recebimento — {selectedProduct.name}
+                  Simulador por Meio de Recebimento — {selectedProduct.shortName || selectedProduct.name}
                 </h2>
                 <p className="text-xs text-zinc-400">
                   Compare o lucro líquido conforme a forma de pagamento do cliente

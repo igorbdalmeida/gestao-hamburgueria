@@ -973,16 +973,7 @@ export default function CardapioVirtualPage() {
                     }`}
                   >
                     <div>
-                      <div
-                        onClick={(e) => {
-                          if (item.imageUrl) {
-                            e.stopPropagation();
-                            setZoomPhotoItem(item);
-                          }
-                        }}
-                        className="aspect-square bg-[#09090b] relative overflow-hidden flex items-center justify-center text-3xl"
-                        title={item.imageUrl ? 'Toque para ampliar a foto' : undefined}
-                      >
+                      <div className="aspect-square bg-[#09090b] relative overflow-hidden flex items-center justify-center text-3xl">
                         {item.imageUrl ? (
                           <img
                             src={item.imageUrl}
@@ -1139,15 +1130,8 @@ export default function CardapioVirtualPage() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div
-                    onClick={() => {
-                      if (item.imageUrl) {
-                        setZoomPhotoItem(item);
-                      } else {
-                        openProductDetail(item);
-                      }
-                    }}
-                    className="size-24 rounded-[10px] bg-[#09090b] border border-white/[0.08] overflow-hidden flex items-center justify-center text-3xl relative shadow-md"
-                    title={item.imageUrl ? 'Toque para ampliar a foto' : undefined}
+                    onClick={() => openProductDetail(item)}
+                    className="size-24 rounded-[10px] bg-[#09090b] border border-white/[0.08] overflow-hidden flex items-center justify-center text-3xl relative shadow-md cursor-pointer"
                   >
                     {item.imageUrl ? (
                       <img
