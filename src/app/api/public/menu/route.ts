@@ -77,6 +77,22 @@ export async function GET(request: Request) {
       ? state.settings.dailyBurgerLimit
       : null;
 
+  const getCategoryPriority = (cat?: string) => {
+    const c = (cat || '').toLowerCase();
+    if (c.includes('hamb') || c.includes('burger') || c.includes('lanche')) return 1;
+    if (c.includes('porç') || c.includes('porc') || c.includes('combo') || c.includes('batata')) return 2;
+    if (c.includes('sobremesa') || c.includes('doce')) return 3;
+    if (c.includes('bebida') || c.includes('refrig')) return 4;
+    if (c.includes('acréscimo') || c.includes('acrescimo') || c.includes('adicion')) return 6;
+    return 5;
+  };
+
+  const getStatusPriority = (status?: string) => {
+    if (!status || status === 'disponivel') return 1;
+    if (status === 'em_breve') return 2;
+    return 3;
+  };
+
   // Public Menu Response — NO CMV, NO MARGINS, NO SUPPLIERS, NO FINANCIAL DATA
   const publicMenu = state.products
     .filter((p) => p.availableInMenu)
@@ -106,6 +122,11 @@ export async function GET(request: Request) {
         trackStock: Boolean(p.trackStock),
         stockQty: p.trackStock && typeof p.stockQty === 'number' ? p.stockQty : null,
       };
+    })
+    .sort((a, b) => {
+      const catDiff = getCategoryPriority(a.category) - getCategoryPriority(b.category);
+      if (catDiff !== 0) return catDiff;
+      return getStatusPriority(a.menuStatus) - getStatusPriority(b.menuStatus);
     });
 
   return NextResponse.json({

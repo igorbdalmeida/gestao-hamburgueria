@@ -415,10 +415,28 @@ export default function CardapioVirtualPage() {
     [menu]
   );
 
-  const standaloneMenu = useMemo(
-    () => menu.filter((m) => m.category !== 'Acréscimos / Adicionais'),
-    [menu]
-  );
+  const standaloneMenu = useMemo(() => {
+    const getCategoryOrder = (cat?: string) => {
+      const c = (cat || '').toLowerCase();
+      if (c.includes('hamb') || c.includes('burger') || c.includes('lanche')) return 1;
+      if (c.includes('porç') || c.includes('porc') || c.includes('combo') || c.includes('batata')) return 2;
+      if (c.includes('sobremesa') || c.includes('doce')) return 3;
+      if (c.includes('bebida') || c.includes('refrig')) return 4;
+      return 5;
+    };
+    const getStatusOrder = (status?: string) => {
+      if (!status || status === 'disponivel') return 1;
+      if (status === 'em_breve') return 2;
+      return 3;
+    };
+    return menu
+      .filter((m) => m.category !== 'Acréscimos / Adicionais')
+      .sort((a, b) => {
+        const catDiff = getCategoryOrder(a.category) - getCategoryOrder(b.category);
+        if (catDiff !== 0) return catDiff;
+        return getStatusOrder(a.menuStatus) - getStatusOrder(b.menuStatus);
+      });
+  }, [menu]);
 
   const portionsInMenu = useMemo(
     () => standaloneMenu.filter((m) => m.category === 'Porções & Combos'),

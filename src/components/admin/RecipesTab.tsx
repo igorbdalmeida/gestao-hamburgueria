@@ -24,8 +24,25 @@ interface Props {
   onUpdateState: (updater: (prev: AppDatabaseState) => AppDatabaseState) => void;
 }
 
+function getProductCategoryPriority(cat?: string): number {
+  const c = (cat || '').toLowerCase();
+  if (c.includes('hamb') || c.includes('burger') || c.includes('lanche')) return 1;
+  if (c.includes('porç') || c.includes('porc') || c.includes('combo') || c.includes('batata')) return 2;
+  if (c.includes('sobremesa') || c.includes('doce')) return 3;
+  if (c.includes('bebida') || c.includes('refrig')) return 4;
+  if (c.includes('acréscimo') || c.includes('acrescimo') || c.includes('adicion')) return 6;
+  return 5;
+}
+
+function sortProductsByCategory(products: Product[]): Product[] {
+  return [...products].sort(
+    (a, b) => getProductCategoryPriority(a.category) - getProductCategoryPriority(b.category)
+  );
+}
+
 export default function RecipesTab({ state, onUpdateState }: Props) {
-  const [selectedId, setSelectedId] = useState<string>(state.products[0]?.id || '');
+  const sortedProducts = sortProductsByCategory(state.products);
+  const [selectedId, setSelectedId] = useState<string>(sortedProducts[0]?.id || '');
   const [showNewModal, setShowNewModal] = useState(false);
 
   const [newName, setNewName] = useState('');
@@ -267,7 +284,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
     };
     onUpdateState((prev) => ({
       ...prev,
-      products: [...prev.products, copy],
+      products: sortProductsByCategory([...prev.products, copy]),
     }));
     setSelectedId(copy.id);
   }
@@ -430,7 +447,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
     onUpdateState((prev) => ({
       ...prev,
-      products: [...prev.products, created],
+      products: sortProductsByCategory([...prev.products, created]),
     }));
     setSelectedId(created.id);
     setShowNewModal(false);
@@ -492,7 +509,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
 
       {/* Product Selector Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {state.products.map((prod) => {
+        {sortedProducts.map((prod) => {
           const m = calculateProductMetrics(prod, state.ingredients);
           const active = prod.id === selectedProduct?.id;
           const status = prod.menuStatus || (prod.availableInMenu ? 'disponivel' : 'esgotado');
