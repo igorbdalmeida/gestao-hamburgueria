@@ -1195,11 +1195,11 @@ export default function CardapioVirtualPage() {
           Step 2: Dedicated Upsell (Batata Frita + Bebida Gelada, including "Em Breve" special fries) */}
       {detailItem && (
         <div
-          className="fixed inset-0 bg-black/75 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={() => setDetailItem(null)}
         >
           <div
-            className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-2xl"
+            className="bg-[#121215] border border-white/[0.12] w-full max-w-md rounded-2xl max-h-[88vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {detailStep === 1 ? (
@@ -1728,8 +1728,8 @@ export default function CardapioVirtualPage() {
 
       {/* iFood-Style Bag / Checkout Drawer */}
       {bagOpen && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-[#121215] border border-white/[0.12] w-full max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto p-5 space-y-4">
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-[#121215] border border-white/[0.12] w-full max-w-lg rounded-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="size-4 text-[#ff5400]" />
