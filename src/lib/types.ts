@@ -192,6 +192,19 @@ export interface SaleOrder {
   status: OrderStatus;
   origin: 'Cardápio Virtual' | 'Lançamento Manual PDV';
   customerNotes?: string;
+  couponCode?: string;
+  discountAmount?: number;
+}
+
+export interface CustomerCoupon {
+  id: string;
+  code: string;
+  discountPct: number; // ex: 10 para 10% OFF
+  description: string;
+  createdAt: string;
+  used: boolean;
+  usedAt?: string;
+  usedOrderId?: string;
 }
 
 export interface CustomerActivity {
@@ -228,6 +241,7 @@ export interface CustomerProfile {
     date: string;
     giftDescription: string;
   }[];
+  coupons?: CustomerCoupon[];
   activities: CustomerActivity[];
 }
 

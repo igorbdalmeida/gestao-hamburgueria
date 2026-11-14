@@ -25,6 +25,7 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string>(state.customers[0]?.id || '');
   const [newGiftDesc, setNewGiftDesc] = useState('');
+  const [customDiscountPct, setCustomDiscountPct] = useState<string>('10');
 
   const filteredCustomers = useMemo(() => {
     return state.customers.filter((c) => {
@@ -196,6 +197,153 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
     return sorted[0] || null;
   }
 
+  function buildCouponWhatsAppLink(c: CustomerProfile, discountPct = 10) {
+    const storeName = state.settings.storeName || 'Monster Burger';
+    const text = [
+      `Oi, *${c.name}*! 🍔🎉 Tudo bem? Aqui é da *${storeName}*!`,
+      ``,
+      `Muito obrigado pelo seu pedido com a gente!`,
+      `Como forma de agradecimento, acabamos de liberar um *CUPOM DE ${discountPct}% DE DESCONTO* exclusivo na sua conta para você usar na sua próxima compra! 🎟️🔥`,
+      ``,
+      `Para usar é super fácil: quando abrir o nosso cardápio (*https://monsterburger.vercel.app*), basta colocar o seu número de WhatsApp que o seu cupom de *${discountPct}% OFF* já vai aparecer liberado automaticamente na sua sacola para você ativar! 🍔💛`,
+    ].join('\n');
+    const clean = normalizePhone(c.phone);
+    const target = clean.startsWith('55') ? clean : `55${clean}`;
+    return `https://api.whatsapp.com/send?phone=${target}&text=${encodeURIComponent(text)}`;
+  }
+
+  function handleGrantCouponToCustomer(customerId: string, pct = 10) {
+    const nowIso = new Date().toISOString();
+    const today = todayLocal();
+    const cleanPct = Math.min(90, Math.max(1, Math.round(pct)));
+    const code = `VIP${cleanPct}`;
+
+    onUpdateState((prev) => ({
+      ...prev,
+      customers: prev.customers.map((c) => {
+        if (c.id !== customerId) return c;
+        const currentCoupons = c.coupons || [];
+        const hasUnusedSame = currentCoupons.some(
+          (cp) => !cp.used && cp.discountPct === cleanPct
+        );
+        if (hasUnusedSame) return c;
+
+        const newCoupon = {
+          id: `cp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          code,
+          discountPct: cleanPct,
+          description: `${cleanPct}% de Desconto na Próxima Compra`,
+          createdAt: nowIso,
+          used: false,
+        };
+        const nextTags = c.tags.includes('Cupom 10% Liberado')
+          ? c.tags
+          : [...c.tags, `Cupom ${cleanPct}% Liberado`];
+
+        return {
+          ...c,
+          tags: nextTags,
+          coupons: [newCoupon, ...currentCoupons],
+          giftHistory: [
+            { date: today, giftDescription: `Cupom ${code} (${cleanPct}% OFF liberado na conta)` },
+            ...c.giftHistory,
+          ],
+          activities: [
+            {
+              id: `act-${Date.now()}`,
+              timestamp: nowIso,
+              type: 'observacao_admin',
+              description: `Cupom ${code} (${cleanPct}% OFF) liberado na conta do cliente`,
+            },
+            ...c.activities,
+          ],
+        };
+      }),
+    }));
+  }
+
+  function handleRemoveCoupon(customerId: string, couponId: string) {
+    onUpdateState((prev) => ({
+      ...prev,
+      customers: prev.customers.map((c) => {
+        if (c.id !== customerId) return c;
+        return {
+          ...c,
+          coupons: (c.coupons || []).filter((cp) => cp.id !== couponId),
+        };
+      }),
+    }));
+  }
+
+  function handleBulkGrant50FirstCustomers() {
+    // Pega até os 50 primeiros clientes (ordenados pelo cadastro / primeiros pedidos)
+    const sortedByFirst = [...state.customers]
+      .filter((c) => normalizePhone(c.phone).length >= 8)
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
+      .slice(0, 50);
+
+    if (sortedByFirst.length === 0) {
+      alert('Ainda não há clientes cadastrados com telefone para receber o cupom.');
+      return;
+    }
+
+    const targetIds = new Set(sortedByFirst.map((c) => c.id));
+    const nowIso = new Date().toISOString();
+    const today = todayLocal();
+    let grantedCount = 0;
+
+    onUpdateState((prev) => ({
+      ...prev,
+      customers: prev.customers.map((c) => {
+        if (!targetIds.has(c.id)) return c;
+        const currentCoupons = c.coupons || [];
+        const alreadyHasActive = currentCoupons.some((cp) => !cp.used);
+        if (alreadyHasActive) return c;
+
+        grantedCount++;
+        const newCoupon = {
+          id: `cp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          code: 'VIP10',
+          discountPct: 10,
+          description: '10% OFF — Presente dos 50 Primeiros Pedidos!',
+          createdAt: nowIso,
+          used: false,
+        };
+        const nextTags = Array.from(
+          new Set([...c.tags, 'Top 50 Inauguração', 'Cupom 10% Liberado'])
+        );
+
+        return {
+          ...c,
+          tags: nextTags,
+          coupons: [newCoupon, ...currentCoupons],
+          giftHistory: [
+            {
+              date: today,
+              giftDescription: 'Cupom VIP10 (10% OFF — 50 Primeiros Pedidos)',
+            },
+            ...c.giftHistory,
+          ],
+          activities: [
+            {
+              id: `act-${Date.now()}-${grantedCount}`,
+              timestamp: nowIso,
+              type: 'observacao_admin',
+              description: 'Cupom VIP10 (10% OFF - 50 Primeiros Pedidos) liberado na conta',
+            },
+            ...c.activities,
+          ],
+        };
+      }),
+    }));
+
+    alert(
+      grantedCount > 0
+        ? `Pronto! Cupom de 10% OFF liberado na conta de ${grantedCount} cliente(s) dos 50 primeiros pedidos! Agora basta clicar no botão de WhatsApp de cada um para avisá-los.`
+        : 'Todos os clientes dos 50 primeiros pedidos já possuem um cupom ativo na conta!'
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -208,6 +356,14 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleBulkGrant50FirstCustomers}
+            className="btn-monster-primary text-xs"
+            title="Libera automaticamente um cupom de 10% de desconto na conta dos 50 primeiros clientes"
+          >
+            <Gift className="size-3.5" /> 🎟️ Gerar Cupom 10% p/ 50 Primeiros Clientes
+          </button>
           {state.customers.length > 0 && (
             <button
               type="button"
@@ -280,6 +436,7 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
               {filteredCustomers.map((c) => {
                 const active = c.id === selectedCustomer?.id;
                 const fav = getCustomerFavoriteItem(c);
+                const activeCoupon = (c.coupons || []).find((cp) => !cp.used);
                 return (
                   <div
                     key={c.id}
@@ -292,7 +449,14 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <p className="text-xs font-semibold text-zinc-100">{c.name}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-xs font-semibold text-zinc-100">{c.name}</p>
+                          {activeCoupon && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-[9px] font-bold text-emerald-300">
+                              🎟️ Cupom {activeCoupon.discountPct}% Ativo
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] text-zinc-400 font-mono mt-0.5 flex items-center gap-1">
                           <Phone className="size-3 text-zinc-500" /> {formatPhoneBR(c.phone)}
                         </p>
@@ -398,6 +562,110 @@ export default function CustomersCrmTab({ state, onUpdateState }: Props) {
                       <Trash2 className="size-3.5" /> Excluir Cliente
                     </button>
                   </div>
+                </div>
+
+                {/* Painel de Cupons de Desconto na Conta do Cliente */}
+                <div className="bg-gradient-to-r from-orange-500/10 via-[#18181c] to-[#18181c] border border-orange-500/30 rounded-[10px] p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                        🎟️ Cupons de Desconto na Conta de {selectedCustomer.name}
+                      </h3>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">
+                        Ao liberar o cupom aqui, ele aparece automaticamente no cardápio quando este cliente digitar o telefone ({formatPhoneBR(selectedCustomer.phone)}).
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center bg-[#09090b] border border-white/[0.14] rounded-[6px] px-2 py-1 text-xs">
+                        <input
+                          type="number"
+                          min={1}
+                          max={90}
+                          value={customDiscountPct}
+                          onChange={(e) => setCustomDiscountPct(e.target.value)}
+                          className="w-10 bg-transparent text-zinc-100 font-bold text-center outline-none tabular-nums"
+                          title="Porcentagem de desconto"
+                        />
+                        <span className="text-zinc-400 font-semibold">% OFF</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleGrantCouponToCustomer(
+                            selectedCustomer.id,
+                            parseFloat(customDiscountPct) || 10
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-[6px] bg-[#ff5400] hover:bg-[#ea4b00] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-md shadow-orange-500/20 transition"
+                      >
+                        <Gift className="size-3.5" /> Dar Cupom {parseFloat(customDiscountPct) || 10}% OFF
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lista de Cupons Ativos e Usados do Cliente */}
+                  {(selectedCustomer.coupons || []).length > 0 ? (
+                    <div className="space-y-2 pt-1">
+                      {(selectedCustomer.coupons || []).map((cp) => (
+                        <div
+                          key={cp.id}
+                          className={`p-3 rounded-[8px] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                            cp.used
+                              ? 'bg-[#09090b]/60 border-white/[0.06] text-zinc-500'
+                              : 'bg-[#09090b] border-emerald-500/40 text-zinc-100'
+                          }`}
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                                  cp.used
+                                    ? 'bg-zinc-800 text-zinc-400'
+                                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                }`}
+                              >
+                                🎟️ {cp.code} • {cp.discountPct}% OFF
+                              </span>
+                              <span className="font-medium">
+                                {cp.used
+                                  ? `✓ Já utilizado pelo cliente${
+                                      cp.usedAt ? ` em ${cp.usedAt.slice(0, 10)}` : ''
+                                    }`
+                                  : 'Disponível na conta para o próximo pedido!'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-zinc-400">{cp.description}</p>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!cp.used && (
+                              <a
+                                href={buildCouponWhatsAppLink(selectedCustomer, cp.discountPct)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1.5 rounded-[6px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition"
+                              >
+                                <MessageCircle className="size-3.5" /> Avisar Cupom no WhatsApp
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCoupon(selectedCustomer.id, cp.id)}
+                              className="p-1.5 text-zinc-500 hover:text-rose-400 transition"
+                              title="Remover cupom"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-zinc-400 bg-[#09090b]/60 border border-white/[0.06] rounded-[8px] px-3 py-2">
+                      Este cliente ainda não possui cupons ativos. Clique em <strong>Dar Cupom 10% OFF</strong> acima para liberar na conta dele e enviar o aviso no WhatsApp!
+                    </p>
+                  )}
                 </div>
 
                 {/* Metrics */}

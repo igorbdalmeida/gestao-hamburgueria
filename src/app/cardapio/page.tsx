@@ -1,7 +1,7 @@
 'use client';
 
 import { formatBRL, formatPhoneBR, normalizePhone } from '@/lib/pricing';
-import { OrderItem, OrderPaymentMethod } from '@/lib/types';
+import { CustomerCoupon, OrderItem, OrderPaymentMethod } from '@/lib/types';
 import {
   Banknote,
   Check,
@@ -67,6 +67,7 @@ interface RecognizedCustomer {
   preferredPaymentMethod: OrderPaymentMethod;
   totalOrders: number;
   favoriteItemIds: string[];
+  activeCoupons?: CustomerCoupon[];
 }
 
 interface CompletedOrderDetails {
@@ -87,6 +88,8 @@ interface CompletedOrderDetails {
   paymentMethod: OrderPaymentMethod;
   changeFor?: string;
   customerNotes?: string;
+  couponCode?: string;
+  discountAmount?: number;
   pixKey: string;
   pixBeneficiary: string;
   whatsappNumber: string;
@@ -128,6 +131,7 @@ export default function CardapioVirtualPage() {
   const [name, setName] = useState('');
   const [recognized, setRecognized] = useState<RecognizedCustomer | null>(null);
   const [checkingPhone, setCheckingPhone] = useState(false);
+  const [selectedCouponId, setSelectedCouponId] = useState<string | null>(null);
 
   // Address
   const [street, setStreet] = useState('');
@@ -199,8 +203,14 @@ export default function CardapioVirtualPage() {
         if (c.preferredPaymentMethod) {
           setPaymentMethod(c.preferredPaymentMethod);
         }
+        if (c.activeCoupons && c.activeCoupons.length > 0) {
+          setSelectedCouponId(c.activeCoupons[0].id);
+        } else {
+          setSelectedCouponId(null);
+        }
       } else {
         setRecognized(null);
+        setSelectedCouponId(null);
       }
     } catch {
       // ignore
@@ -245,8 +255,20 @@ export default function CardapioVirtualPage() {
         if (c.preferredPaymentMethod) {
           setPaymentMethod(c.preferredPaymentMethod);
         }
-        setPopupSuccessMsg(`Que bom ter você de volta, ${c.name}! Seus dados de entrega já foram carregados.`);
+        if (c.activeCoupons && c.activeCoupons.length > 0) {
+          setSelectedCouponId(c.activeCoupons[0].id);
+          setPopupSuccessMsg(
+            `Olá, ${c.name}! 🎟️ Você tem um cupom de ${c.activeCoupons[0].discountPct}% OFF disponível na sua conta!`
+          );
+        } else {
+          setSelectedCouponId(null);
+          setPopupSuccessMsg(
+            `Que bom ter você de volta, ${c.name}! Seus dados de entrega já foram carregados.`
+          );
+        }
       } else {
+        setRecognized(null);
+        setSelectedCouponId(null);
         setPopupSuccessMsg('Número salvo com sucesso! Você receberá nossas ofertas e cupons exclusivos.');
       }
     } catch {
@@ -460,8 +482,18 @@ export default function CardapioVirtualPage() {
 
   const totalCartItems = cartItemsList.reduce((acc, i) => acc + i.quantity, 0);
   const subtotalAmount = cartItemsList.reduce((acc, i) => acc + i.subtotal, 0);
+  const availableCustomerCoupons = recognized?.activeCoupons || [];
+  const activeSelectedCoupon =
+    availableCustomerCoupons.find((cp) => cp.id === selectedCouponId) || null;
+  const couponDiscountAmount = activeSelectedCoupon
+    ? Number(((subtotalAmount * activeSelectedCoupon.discountPct) / 100).toFixed(2))
+    : 0;
+  const discountedSubtotalAmount = Math.max(
+    0,
+    Number((subtotalAmount - couponDiscountAmount).toFixed(2))
+  );
   const deliveryFee = store?.deliveryFeeDefault || 0;
-  const totalOrderAmount = subtotalAmount + deliveryFee;
+  const totalOrderAmount = Number((discountedSubtotalAmount + deliveryFee).toFixed(2));
 
   // Smart Upsell Logic in Bag
   const hasDrinkInCart = useMemo(
@@ -565,7 +597,12 @@ export default function CardapioVirtualPage() {
       `*ITENS DO PEDIDO:*`,
       itemsLines,
       `--------------------------------`,
-      `▸ *Subtotal:* ${formatBRL(order.subtotal)}`,
+      ...(order.couponCode && order.discountAmount
+        ? [
+            `▸ *Cupom Aplicado:* ${order.couponCode} (- ${formatBRL(order.discountAmount)})`,
+          ]
+        : []),
+      `▸ *Subtotal c/ Desconto:* ${formatBRL(order.subtotal)}`,
       `▸ *Taxa de Entrega:* ${
         order.deliveryFee === 0 ? 'Grátis' : formatBRL(order.deliveryFee)
       }`,
@@ -617,12 +654,23 @@ export default function CardapioVirtualPage() {
           paymentMethod,
           changeFor: paymentMethod === 'Dinheiro' ? changeFor : undefined,
           customerNotes,
+          useCouponId: activeSelectedCoupon?.id,
         }),
       });
       const data = await res.json();
       if (data.ok && data.order) {
         const orderObj = data.order as CompletedOrderDetails;
         setCompletedOrder(orderObj);
+        if (activeSelectedCoupon && recognized) {
+          const remainingCoupons = (recognized.activeCoupons || []).filter(
+            (cp) => cp.id !== activeSelectedCoupon.id
+          );
+          setRecognized({
+            ...recognized,
+            activeCoupons: remainingCoupons,
+          });
+          setSelectedCouponId(remainingCoupons[0]?.id || null);
+        }
         setCart({});
         setBagOpen(false);
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -722,6 +770,12 @@ export default function CardapioVirtualPage() {
                   </div>
                 ))}
               </div>
+              {completedOrder.couponCode && completedOrder.discountAmount && (
+                <div className="pt-1.5 border-t border-white/[0.06] flex items-center justify-between text-emerald-400 font-semibold tabular-nums">
+                  <span>🎟️ Cupom Aplicado ({completedOrder.couponCode})</span>
+                  <span>- {formatBRL(completedOrder.discountAmount)}</span>
+                </div>
+              )}
               <div className="border-t border-white/[0.08] pt-2 flex items-center justify-between font-bold text-sm text-zinc-100 tabular-nums">
                 <span>Total ({completedOrder.paymentMethod})</span>
                 <span className="text-orange-400">{formatBRL(completedOrder.totalAmount)}</span>
@@ -866,20 +920,26 @@ export default function CardapioVirtualPage() {
 
             {/* Quick Recognition Status */}
             {recognized ? (
-              <div className="bg-[#18181c] border border-orange-500/30 rounded-[10px] p-2.5 sm:w-72 flex items-center justify-between">
+              <div className="bg-[#18181c] border border-orange-500/30 rounded-[10px] p-2.5 sm:w-80 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5">
                     <Sparkles className="size-3 text-orange-400" />
                     Olá, {recognized.name}!
                   </p>
-                  <p className="text-[10px] text-zinc-400">
-                    Dados de entrega carregados automaticamente
-                  </p>
+                  {availableCustomerCoupons.length > 0 ? (
+                    <p className="text-[11px] font-bold text-emerald-400 mt-0.5">
+                      🎟️ Cupom de {availableCustomerCoupons[0].discountPct}% OFF disponível na sua conta!
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-zinc-400">
+                      Dados de entrega carregados automaticamente
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPromoPopup(true)}
-                  className="text-[10px] text-orange-400 hover:text-orange-300 underline font-medium"
+                  className="text-[10px] text-orange-400 hover:text-orange-300 underline font-medium shrink-0"
                 >
                   Alterar
                 </button>
@@ -1887,6 +1947,60 @@ export default function CardapioVirtualPage() {
                     Cliente reconhecido! Confira seu endereço abaixo.
                   </p>
                 )}
+
+                {/* Account Coupons Available for this Customer */}
+                {availableCustomerCoupons.length > 0 && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-[8px] p-3 space-y-2 mt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        🎟️ Você tem um Cupom disponível na sua conta!
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-black text-[10px] font-bold">
+                        Presente VIP
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {availableCustomerCoupons.map((cp) => {
+                        const isChecked = selectedCouponId === cp.id;
+                        const previewDiscount = Number(
+                          ((subtotalAmount * cp.discountPct) / 100).toFixed(2)
+                        );
+                        return (
+                          <label
+                            key={cp.id}
+                            className={`flex items-center justify-between p-2.5 rounded-[8px] border cursor-pointer transition ${
+                              isChecked
+                                ? 'bg-[#09090b] border-emerald-400 text-zinc-100'
+                                : 'bg-[#09090b]/60 border-white/[0.1] text-zinc-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() =>
+                                  setSelectedCouponId(isChecked ? null : cp.id)
+                                }
+                                className="accent-emerald-500 size-4"
+                              />
+                              <div>
+                                <p className="text-xs font-bold text-emerald-300">
+                                  Usar Cupom {cp.code} ({cp.discountPct}% OFF)
+                                </p>
+                                <p className="text-[11px] text-zinc-400">
+                                  {cp.description}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-xs font-bold text-emerald-400 tabular-nums shrink-0">
+                              - {formatBRL(previewDiscount)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Address */}
@@ -2026,6 +2140,14 @@ export default function CardapioVirtualPage() {
                   <span>Subtotal dos itens</span>
                   <span>{formatBRL(subtotalAmount)}</span>
                 </div>
+                {activeSelectedCoupon && couponDiscountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-400 font-semibold">
+                    <span>
+                      🎟️ Cupom {activeSelectedCoupon.code} ({activeSelectedCoupon.discountPct}% OFF)
+                    </span>
+                    <span>- {formatBRL(couponDiscountAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-zinc-400">
                   <span>Taxa de entrega</span>
                   <span>{deliveryFee === 0 ? 'Grátis' : formatBRL(deliveryFee)}</span>

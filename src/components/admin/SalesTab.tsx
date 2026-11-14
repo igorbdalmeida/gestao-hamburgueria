@@ -332,6 +332,111 @@ export default function SalesTab({ state, onUpdateState }: Props) {
     }));
   }
 
+  function handleGrantAndNotifyCoupon(ord: SaleOrder) {
+    const cleanPhone = normalizePhone(ord.customerPhone || '');
+    if (cleanPhone.length < 8 || cleanPhone === '00000000000') {
+      alert('Este pedido não possui um número de WhatsApp válido.');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const todayDate = toLocalDate(nowIso);
+
+    onUpdateState((prev) => {
+      const exists = prev.customers.some(
+        (c) =>
+          c.id === ord.customerId ||
+          normalizePhone(c.phone) === cleanPhone ||
+          normalizePhone(c.phone).endsWith(cleanPhone)
+      );
+
+      let nextCustomers = [...prev.customers];
+      if (!exists) {
+        nextCustomers.unshift({
+          id: `cust-${Date.now()}`,
+          phone: cleanPhone,
+          name: ord.customerName || 'Cliente',
+          createdAt: nowIso,
+          lastSeenAt: nowIso,
+          lastOrderAt: nowIso,
+          addresses: ord.deliveryAddress?.street ? [ord.deliveryAddress] : [],
+          totalOrders: 1,
+          totalSpent: ord.totalAmount,
+          averageTicket: ord.totalAmount,
+          preferredPaymentMethod: ord.paymentMethod,
+          itemFrequency: {},
+          tags: ['Top 50 Inauguração', 'Cupom 10% Liberado'],
+          giftHistory: [
+            { date: todayDate, giftDescription: 'Cupom VIP10 (10% OFF liberado na conta)' },
+          ],
+          coupons: [
+            {
+              id: `cp-${Date.now()}`,
+              code: 'VIP10',
+              discountPct: 10,
+              description: '10% de Desconto na Próxima Compra',
+              createdAt: nowIso,
+              used: false,
+            },
+          ],
+          activities: [],
+        });
+      } else {
+        nextCustomers = prev.customers.map((c) => {
+          const isMatch =
+            c.id === ord.customerId ||
+            normalizePhone(c.phone) === cleanPhone ||
+            normalizePhone(c.phone).endsWith(cleanPhone);
+          if (!isMatch) return c;
+
+          const currentCoupons = c.coupons || [];
+          const hasActive10 = currentCoupons.some((cp) => !cp.used && cp.discountPct === 10);
+          if (hasActive10) return c;
+
+          return {
+            ...c,
+            tags: Array.from(new Set([...c.tags, 'Cupom 10% Liberado'])),
+            coupons: [
+              {
+                id: `cp-${Date.now()}`,
+                code: 'VIP10',
+                discountPct: 10,
+                description: '10% de Desconto na Próxima Compra',
+                createdAt: nowIso,
+                used: false,
+              },
+              ...currentCoupons,
+            ],
+            giftHistory: [
+              { date: todayDate, giftDescription: 'Cupom VIP10 (10% OFF liberado na conta)' },
+              ...c.giftHistory,
+            ],
+          };
+        });
+      }
+
+      return {
+        ...prev,
+        customers: nextCustomers,
+      };
+    });
+
+    const storeName = state.settings.storeName || 'Monster Burger';
+    const msg = [
+      `Oi, *${ord.customerName}*! 🍔🎉 Tudo bem? Aqui é da *${storeName}*!`,
+      ``,
+      `Muito obrigado pelo seu pedido com a gente!`,
+      `Como forma de agradecimento, acabamos de liberar um *CUPOM DE 10% DE DESCONTO* exclusivo na sua conta para você usar na sua próxima compra! 🎟️🔥`,
+      ``,
+      `Para usar é super fácil: quando abrir o nosso cardápio (*https://monsterburger.vercel.app*), basta colocar o seu número de WhatsApp que o seu cupom de *10% OFF* já vai aparecer liberado automaticamente na sua sacola para você ativar! 🍔💛`,
+    ].join('\n');
+    const targetPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+    window.open(
+      `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(msg)}`,
+      '_blank'
+    );
+  }
+
   // Fila ativa em tempo real: apenas pedidos que ainda não foram entregues nem cancelados
   const activeQueueOrders = useMemo(() => {
     // Ordem de produção: o pedido mais antigo aparece primeiro (FIFO)
@@ -662,6 +767,12 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                         {ord.paymentMethod}
                         {ord.changeFor ? ` (Troco p/ ${ord.changeFor})` : ''}
                       </span>
+                      {ord.couponCode && (
+                        <span className="px-2 py-0.5 rounded-[4px] bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+                          🎟️ Cupom: {ord.couponCode}
+                          {ord.discountAmount ? ` (-${formatBRL(ord.discountAmount)})` : ''}
+                        </span>
+                      )}
                       <span className="text-zinc-500 tabular-nums">{ord.date}</span>
                     </div>
 
@@ -723,16 +834,26 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                       </select>
 
                       {ord.customerPhone && ord.customerPhone !== '00000000000' && (
-                        <a
-                          href={waLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label="Avisar cliente no WhatsApp"
-                          className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 rounded-[6px] inline-flex items-center gap-1 text-xs font-medium transition"
-                          title="Avisar cliente no WhatsApp"
-                        >
-                          <MessageCircle className="size-3.5" /> WhatsApp Cliente
-                        </a>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleGrantAndNotifyCoupon(ord)}
+                            className="px-2.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/35 text-orange-300 rounded-[6px] inline-flex items-center gap-1 text-xs font-semibold transition"
+                            title="Libera um cupom de 10% OFF na conta deste cliente e já abre o WhatsApp com a mensagem pronta"
+                          >
+                            🎟️ Dar Cupom 10% + WhatsApp
+                          </button>
+                          <a
+                            href={waLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="Avisar cliente no WhatsApp"
+                            className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 rounded-[6px] inline-flex items-center gap-1 text-xs font-medium transition"
+                            title="Avisar cliente no WhatsApp"
+                          >
+                            <MessageCircle className="size-3.5" /> WhatsApp Cliente
+                          </a>
+                        </>
                       )}
 
                       <button
@@ -924,10 +1045,20 @@ export default function SalesTab({ state, onUpdateState }: Props) {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <div className="text-right tabular-nums">
                     <span className="font-semibold text-zinc-200">{formatBRL(ord.totalAmount)}</span>
                   </div>
+                  {ord.customerPhone && ord.customerPhone !== '00000000000' && (
+                    <button
+                      type="button"
+                      onClick={() => handleGrantAndNotifyCoupon(ord)}
+                      className="px-2.5 py-1 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/35 text-orange-300 rounded-[6px] text-[11px] font-semibold transition"
+                      title="Liberar cupom de 10% OFF na conta do cliente e enviar aviso no WhatsApp"
+                    >
+                      🎟️ Dar Cupom 10% + WhatsApp
+                    </button>
+                  )}
                   <select
                     value={ord.status}
                     aria-label="Reabrir status do pedido"

@@ -55,6 +55,8 @@ export async function GET(request: Request) {
     else if (prefMethod.includes('InfinitePay') || prefMethod.includes('Link'))
       prefMethod = 'Cartão de Crédito (Na Entrega)';
 
+    const activeCoupons = (customer.coupons || []).filter((cp) => !cp.used);
+
     return NextResponse.json({
       found: true,
       customer: {
@@ -65,6 +67,7 @@ export async function GET(request: Request) {
         preferredPaymentMethod: prefMethod,
         totalOrders: customer.totalOrders,
         favoriteItemIds,
+        activeCoupons,
       },
     });
   }
@@ -142,6 +145,7 @@ export async function POST(request: Request) {
       paymentMethod,
       changeFor,
       customerNotes,
+      useCouponId,
     } = body as {
       customerName: string;
       customerPhone: string;
@@ -161,6 +165,7 @@ export async function POST(request: Request) {
       paymentMethod: OrderPaymentMethod;
       changeFor?: string;
       customerNotes?: string;
+      useCouponId?: string;
     };
 
     const cleanPhone = normalizePhone(customerPhone || '');
@@ -347,13 +352,33 @@ export async function POST(request: Request) {
       );
     }
 
+    // Find or create customer profile ("Investigator CRM")
+    let customer = state.customers.find(
+      (c) => normalizePhone(c.phone) === cleanPhone || normalizePhone(c.phone).endsWith(cleanPhone)
+    );
+
+    // Check if the customer has a valid unused coupon to apply
+    let discountAmount = 0;
+    let appliedCouponCode: string | undefined;
+    let appliedCouponObj: NonNullable<typeof customer>['coupons'] extends (infer U)[] | undefined ? U | undefined : never;
+
+    if (useCouponId && customer?.coupons) {
+      const foundCoupon = customer.coupons.find((cp) => cp.id === useCouponId && !cp.used);
+      if (foundCoupon && foundCoupon.discountPct > 0) {
+        appliedCouponObj = foundCoupon;
+        discountAmount = Number(((subtotal * foundCoupon.discountPct) / 100).toFixed(2));
+        appliedCouponCode = `${foundCoupon.code} (${foundCoupon.discountPct}% OFF)`;
+      }
+    }
+
+    const discountedSubtotal = Math.max(0, Number((subtotal - discountAmount).toFixed(2)));
     const deliveryFee = state.settings.deliveryFeeDefault || 0;
-    const totalAmount = subtotal + deliveryFee;
+    const totalAmount = Number((discountedSubtotal + deliveryFee).toFixed(2));
 
     const fin = calculateOrderFinancials(
       {
         items: orderItems,
-        subtotal,
+        subtotal: discountedSubtotal,
         deliveryFee,
         totalAmount,
         totalCmv,
@@ -372,8 +397,7 @@ export async function POST(request: Request) {
     const nextOrderNumber =
       state.orders.reduce((max, o) => Math.max(max, o.orderNumber || 100), 100) + 1;
 
-    // Find or create customer profile ("Investigator CRM")
-    let customer = state.customers.find((c) => normalizePhone(c.phone) === cleanPhone);
+    const validOrdersCountSoFar = state.orders.filter((o) => o.status !== 'Cancelado').length;
 
     if (!customer) {
       customer = {
@@ -392,6 +416,7 @@ export async function POST(request: Request) {
         tags: ['Novo Cliente'],
         adminNotes: '',
         giftHistory: [],
+        coupons: [],
         activities: [],
       };
       state.customers.unshift(customer);
@@ -431,6 +456,7 @@ export async function POST(request: Request) {
 
     const tagsSet = new Set(customer.tags.filter((t) => t !== 'Novo Cliente'));
     if (customer.totalOrders === 1) tagsSet.add('1º Pedido');
+    if (validOrdersCountSoFar < 50) tagsSet.add('Top 50 Inauguração');
     if (customer.totalOrders >= 3) tagsSet.add('Cliente Fiel');
     if (customer.totalOrders >= 5) tagsSet.add('VIP — Merece Brinde');
     if (customer.averageTicket >= 45) tagsSet.add('Ticket Alto');
@@ -460,7 +486,7 @@ export async function POST(request: Request) {
         neighborhood: 'Centro',
       },
       items: orderItems,
-      subtotal,
+      subtotal: discountedSubtotal,
       deliveryFee,
       totalAmount,
       totalCmv,
@@ -473,7 +499,15 @@ export async function POST(request: Request) {
       status: 'Novo Pedido',
       origin: 'Cardápio Virtual',
       customerNotes: customerNotes ? String(customerNotes).slice(0, 300) : undefined,
+      couponCode: appliedCouponCode,
+      discountAmount: discountAmount > 0 ? discountAmount : undefined,
     };
+
+    if (appliedCouponObj) {
+      appliedCouponObj.used = true;
+      appliedCouponObj.usedAt = nowIso;
+      appliedCouponObj.usedOrderId = newOrder.id;
+    }
 
     const summaryText = orderItems
       .map((i) => `${i.quantity}x ${i.productName.split('-')[0].trim()}`)
@@ -482,7 +516,9 @@ export async function POST(request: Request) {
       id: `act-${Date.now()}`,
       timestamp: nowIso,
       type: 'pedido_realizado',
-      description: `Pedido #${nextOrderNumber} (${summaryText}) via ${paymentMethod}`,
+      description: `Pedido #${nextOrderNumber} (${summaryText}) via ${paymentMethod}${
+        appliedCouponCode ? ` [Cupom: ${appliedCouponCode} -${discountAmount.toFixed(2)}]` : ''
+      }`,
       orderId: newOrder.id,
       totalValue: totalAmount,
     });
@@ -507,6 +543,8 @@ export async function POST(request: Request) {
         paymentMethod: newOrder.paymentMethod,
         changeFor: newOrder.changeFor,
         customerNotes: newOrder.customerNotes,
+        couponCode: newOrder.couponCode,
+        discountAmount: newOrder.discountAmount,
         pixKey: state.settings.pixKey,
         pixBeneficiary: state.settings.pixBeneficiary,
         whatsappNumber: state.settings.whatsappNumber,
