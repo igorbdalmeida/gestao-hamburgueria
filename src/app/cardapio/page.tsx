@@ -1341,16 +1341,13 @@ export default function CardapioVirtualPage() {
                                     : 'bg-[#09090b] border-white/[0.06] text-zinc-300'
                                 }`}
                               >
-                                <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                                  <span className="text-base shrink-0">{addon.imageEmoji || '🧀'}</span>
-                                  <div className="truncate">
-                                    <p className="font-medium text-zinc-100 truncate">
-                                      {addon.name}
-                                    </p>
-                                    <p className="text-[11px] font-semibold text-orange-400 tabular-nums">
-                                      + {formatBRL(addon.price)}
-                                    </p>
-                                  </div>
+                                <div className="min-w-0 pr-2">
+                                  <p className="font-medium text-zinc-100 truncate">
+                                    {addon.name}
+                                  </p>
+                                  <p className="text-[11px] font-semibold text-orange-400 tabular-nums">
+                                    + {formatBRL(addon.price)}
+                                  </p>
                                 </div>
 
                                 <div className="flex items-center gap-1.5 shrink-0">

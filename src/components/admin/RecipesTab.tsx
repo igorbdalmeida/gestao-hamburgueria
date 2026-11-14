@@ -297,7 +297,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         name: '+ Carne Extra (130g)',
         shortName: '+ Carne Extra (130g)',
         description: 'Mais um blend bovino artesanal 130g grelhado na brasa.',
-        emoji: '🥩',
+        emoji: '',
         price: 6.0,
         recipe: blend ? [{ ingredientId: blend.id, quantity: 130, group: 'alimento' }] : [],
       },
@@ -305,7 +305,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         name: '+ Bacon Extra',
         shortName: '+ Bacon Extra',
         description: 'Porção generosa de fatias de bacon crocante.',
-        emoji: '🥓',
+        emoji: '',
         price: 3.5,
         recipe: bacon ? [{ ingredientId: bacon.id, quantity: 30, group: 'alimento' }] : [],
       },
@@ -313,7 +313,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         name: '+ Cheddar Extra',
         shortName: '+ Cheddar Extra',
         description: 'Fatias extras de cheddar derretido.',
-        emoji: '🧀',
+        emoji: '',
         price: 3.0,
         recipe: cheddar ? [{ ingredientId: cheddar.id, quantity: 30, group: 'alimento' }] : [],
       },
@@ -321,7 +321,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         name: '+ Muçarela Extra',
         shortName: '+ Muçarela Extra',
         description: 'Camada extra de queijo muçarela derretido.',
-        emoji: '🧀',
+        emoji: '',
         price: 3.0,
         recipe: mussarela
           ? [{ ingredientId: mussarela.id, quantity: 30, group: 'alimento' }]
@@ -331,7 +331,7 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
         name: '+ Salada Extra',
         shortName: '+ Salada Extra',
         description: 'Adicional de salada fresca selecionada.',
-        emoji: '🥬',
+        emoji: '',
         price: 2.0,
         recipe: [
           ...(alface ? [{ ingredientId: alface.id, quantity: 25, group: 'alimento' as const }] : []),
@@ -414,9 +414,9 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
           : newCategory === 'Sobremesas'
           ? '🍫'
           : isAddonCategory
-          ? '🥓'
+          ? ''
           : '🍔',
-      imageUrl: newImageUrl.trim() || undefined,
+      imageUrl: isAddonCategory ? undefined : newImageUrl.trim() || undefined,
       availableInMenu: true,
       menuStatus: 'disponivel',
       featured: newFeatured,
@@ -508,17 +508,18 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
                   : 'bg-[#121215] border-white/[0.08] text-zinc-400 hover:border-white/[0.16]'
               }`}
             >
-              {prod.imageUrl ? (
-                <img
-                  src={prod.imageUrl}
-                  alt={prod.shortName}
-                  className="size-9 rounded-[6px] object-cover border border-white/[0.1] shrink-0"
-                />
-              ) : (
-                <div className="size-9 rounded-[6px] bg-[#09090b] border border-white/[0.08] flex items-center justify-center text-base shrink-0">
-                  {prod.imageEmoji}
-                </div>
-              )}
+              {!isAddon &&
+                (prod.imageUrl ? (
+                  <img
+                    src={prod.imageUrl}
+                    alt={prod.shortName}
+                    className="size-9 rounded-[6px] object-cover border border-white/[0.1] shrink-0"
+                  />
+                ) : (
+                  <div className="size-9 rounded-[6px] bg-[#09090b] border border-white/[0.08] flex items-center justify-center text-base shrink-0">
+                    {prod.imageEmoji}
+                  </div>
+                ))}
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-medium text-zinc-100">{prod.shortName || prod.name}</span>
@@ -1081,58 +1082,63 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
             <div className="bg-[#121215] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
-                  <ImageIcon className="size-4 text-orange-400" /> Foto e Dados no Cardápio
+                  <ImageIcon className="size-4 text-orange-400" />{' '}
+                  {selectedProduct.category === 'Acréscimos / Adicionais'
+                    ? 'Dados do Acréscimo no Cardápio'
+                    : 'Foto e Dados no Cardápio'}
                 </h3>
               </div>
 
-              {/* Photo Upload Box */}
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-3.5 flex items-center gap-4">
-                {selectedProduct.imageUrl ? (
-                  <img
-                    src={selectedProduct.imageUrl}
-                    alt={selectedProduct.shortName}
-                    className="size-20 rounded-[10px] object-contain border border-orange-500/40 shrink-0 bg-[#09090b]"
-                  />
-                ) : (
-                  <div className="size-20 rounded-[10px] bg-[#09090b] border border-dashed border-white/[0.15] flex flex-col items-center justify-center text-2xl shrink-0">
-                    <span>{selectedProduct.imageEmoji}</span>
-                    <span className="text-[10px] text-zinc-500 mt-0.5">Sem foto</span>
-                  </div>
-                )}
-
-                <div className="space-y-2 flex-1 text-xs">
-                  <label className="btn-monster-primary w-full cursor-pointer text-xs py-1.5">
-                    <Camera className="size-3.5" />
-                    <span>{selectedProduct.imageUrl ? 'Trocar Foto' : 'Enviar Foto do Lanche'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleProductPhotoUpload(e, 'existing')}
-                      className="hidden"
+              {/* Photo Upload Box (Oculto para Acréscimos / Adicionais) */}
+              {selectedProduct.category !== 'Acréscimos / Adicionais' && (
+                <div className="bg-[#18181c] border border-white/[0.08] rounded-[10px] p-3.5 flex items-center gap-4">
+                  {selectedProduct.imageUrl ? (
+                    <img
+                      src={selectedProduct.imageUrl}
+                      alt={selectedProduct.shortName}
+                      className="size-20 rounded-[10px] object-contain border border-orange-500/40 shrink-0 bg-[#09090b]"
                     />
-                  </label>
-
-                  {selectedProduct.imageUrl && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onUpdateState((prev) => ({
-                          ...prev,
-                          products: prev.products.map((p) =>
-                            p.id === selectedProduct.id ? { ...p, imageUrl: undefined } : p
-                          ),
-                        }))
-                      }
-                      className="w-full py-1 text-[11px] text-rose-400 hover:underline text-center"
-                    >
-                      Remover foto atual
-                    </button>
+                  ) : (
+                    <div className="size-20 rounded-[10px] bg-[#09090b] border border-dashed border-white/[0.15] flex flex-col items-center justify-center text-2xl shrink-0">
+                      <span>{selectedProduct.imageEmoji}</span>
+                      <span className="text-[10px] text-zinc-500 mt-0.5">Sem foto</span>
+                    </div>
                   )}
-                  <p className="text-[11px] text-zinc-500 leading-snug">
-                    A foto é exibida inteira no cardápio e amplia quando o cliente toca nela.
-                  </p>
+
+                  <div className="space-y-2 flex-1 text-xs">
+                    <label className="btn-monster-primary w-full cursor-pointer text-xs py-1.5">
+                      <Camera className="size-3.5" />
+                      <span>{selectedProduct.imageUrl ? 'Trocar Foto' : 'Enviar Foto do Lanche'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleProductPhotoUpload(e, 'existing')}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {selectedProduct.imageUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onUpdateState((prev) => ({
+                            ...prev,
+                            products: prev.products.map((p) =>
+                              p.id === selectedProduct.id ? { ...p, imageUrl: undefined } : p
+                            ),
+                          }))
+                        }
+                        className="w-full py-1 text-[11px] text-rose-400 hover:underline text-center"
+                      >
+                        Remover foto atual
+                      </button>
+                    )}
+                    <p className="text-[11px] text-zinc-500 leading-snug">
+                      A foto é exibida inteira no cardápio e amplia quando o cliente toca nela.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="space-y-3 text-xs">
                 <div>
@@ -1279,35 +1285,37 @@ export default function RecipesTab({ state, onUpdateState }: Props) {
               </button>
             </div>
             <form onSubmit={handleCreateNewProduct} className="space-y-3.5 text-xs">
-              {/* Photo Upload inside New Product Modal */}
-              <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 flex items-center gap-3.5">
-                {newImageUrl ? (
-                  <img
-                    src={newImageUrl}
-                    alt="Prévia"
-                    className="size-16 rounded-[8px] object-cover border border-orange-500/40 shrink-0"
-                  />
-                ) : (
-                  <div className="size-16 rounded-[8px] bg-[#09090b] border border-dashed border-white/[0.15] flex items-center justify-center text-2xl shrink-0">
-                    🍔
-                  </div>
-                )}
-                <div className="space-y-1.5 flex-1">
-                  <label className="btn-saas-secondary w-full cursor-pointer text-xs py-1.5">
-                    <Camera className="size-3.5 text-orange-400" />
-                    <span>{newImageUrl ? 'Trocar Foto do Produto' : 'Adicionar Foto do Produto'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleProductPhotoUpload(e, 'new')}
-                      className="hidden"
+              {/* Photo Upload inside New Product Modal (Oculto para Acréscimos / Adicionais) */}
+              {newCategory !== 'Acréscimos / Adicionais' && (
+                <div className="bg-[#18181c] border border-white/[0.08] rounded-[8px] p-3 flex items-center gap-3.5">
+                  {newImageUrl ? (
+                    <img
+                      src={newImageUrl}
+                      alt="Prévia"
+                      className="size-16 rounded-[8px] object-cover border border-orange-500/40 shrink-0"
                     />
-                  </label>
-                  <p className="text-[11px] text-zinc-500">
-                    Tire foto ou escolha da galeria para exibir no cardápio.
-                  </p>
+                  ) : (
+                    <div className="size-16 rounded-[8px] bg-[#09090b] border border-dashed border-white/[0.15] flex items-center justify-center text-2xl shrink-0">
+                      🍔
+                    </div>
+                  )}
+                  <div className="space-y-1.5 flex-1">
+                    <label className="btn-saas-secondary w-full cursor-pointer text-xs py-1.5">
+                      <Camera className="size-3.5 text-orange-400" />
+                      <span>{newImageUrl ? 'Trocar Foto do Produto' : 'Adicionar Foto do Produto'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleProductPhotoUpload(e, 'new')}
+                        className="hidden"
+                      />
+                    </label>
+                    <p className="text-[11px] text-zinc-500">
+                      Tire foto ou escolha da galeria para exibir no cardápio.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="text-zinc-400 block mb-1">Nome do Produto / Lanche / Acréscimo *</label>
